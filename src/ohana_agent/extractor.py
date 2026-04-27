@@ -5,7 +5,10 @@ from typing import Any
 
 from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
 
-from .parsing import clean_text, normalize_listing
+from .parsing import DATE_RE, PRICE_RE, clean_text, normalize_listing
+
+
+LISTING_TEXT_RE = ("room", "apartment", "house", "studio", "sublet")
 
 
 def _first_text(card: Locator, selectors: list[str]) -> str:
@@ -45,6 +48,66 @@ def _all_image_srcs(card: Locator) -> list[str]:
     except Exception:
         pass
     return srcs
+
+
+def _safe_count(locator: Locator) -> int:
+    try:
+        return locator.count()
+    except Exception:
+        return 0
+
+
+def _listing_candidate_score(card: Locator, raw_text: str) -> int:
+    text = clean_text(raw_text)
+    lowered = text.lower()
+
+    if not text or lowered in {"chevron_right", "chevron_left", "keyboard_arrow_right"}:
+        return 0
+
+    score = 0
+
+    try:
+        element_id = card.get_attribute("id", timeout=500) or ""
+        if element_id.startswith("listing-"):
+            score += 6
+    except Exception:
+        pass
+
+    if PRICE_RE.search(text):
+        score += 4
+    if DATE_RE.search(text):
+        score += 2
+    if any(term in lowered for term in LISTING_TEXT_RE):
+        score += 2
+    if _safe_count(card.locator("img")) > 0:
+        score += 1
+    if len(text) >= 35:
+        score += 1
+
+    return score
+
+
+def _selector_quality(page: Page, selector: str, sample_size: int = 12) -> tuple[int, int, int]:
+    try:
+        cards = page.locator(selector)
+        count = cards.count()
+    except Exception:
+        return (0, 0, 0)
+
+    valid_count = 0
+    score_total = 0
+
+    for i in range(min(count, sample_size)):
+        try:
+            raw_text = cards.nth(i).inner_text(timeout=1_000)
+        except Exception:
+            raw_text = ""
+        score = _listing_candidate_score(cards.nth(i), raw_text)
+        if score >= 5:
+            valid_count += 1
+            score_total += score
+
+    return (valid_count, score_total, count)
 
 
 def _wait_for_cards(page: Page, selector: str, timeout_ms: int = 8_000) -> None:
@@ -144,26 +207,26 @@ def extract_listings(
 
     # Use the best selector directly so we can re-query after every back/navigation.
     active_selector = None
-    best_count = 0
+    best_quality = (0, 0, 0)
 
     for selector in result_card_selectors:
-        try:
-            count = page.locator(selector).count()
-            if count > best_count:
-                best_count = count
-                active_selector = selector
-        except Exception:
-            continue
+        quality = _selector_quality(page, selector)
+        if quality > best_quality:
+            best_quality = quality
+            active_selector = selector
 
     if not active_selector:
         print("Cards found: 0")
         return []
 
-    total_cards = min(best_count, max_listings)
+    best_count = best_quality[2]
+    max_candidates = min(best_count, max(max_listings * 3, max_listings))
     print(f"Cards found with selector '{active_selector}': {best_count}")
-    print(f"Extracting up to {total_cards} cards")
+    print(f"Extracting up to {max_listings} listings from {max_candidates} candidates")
 
-    for i in range(total_cards):
+    for i in range(max_candidates):
+        if len(records) >= max_listings:
+            break
         try:
             # Re-query every time because clicking/backing can stale old locators.
             cards = page.locator(active_selector)
@@ -171,9 +234,10 @@ def extract_listings(
 
             raw_text = card.inner_text(timeout=2_000)
             raw_text_clean = clean_text(raw_text)
+            candidate_score = _listing_candidate_score(card, raw_text_clean)
 
-            if len(raw_text_clean) < 40 or raw_text_clean.lower() in {"chevron_right", "chevron_left"}:
-                print(f"Skipping non-listing card {i}: {raw_text_clean[:80]}")
+            if candidate_score < 5:
+                print(f"Skipping non-listing candidate {i}: {raw_text_clean[:80]}")
                 continue
 
             href = _first_attr(card, detail_link_selectors, "href")
@@ -185,7 +249,7 @@ def extract_listings(
             detail_url = href
 
             if capture_detail_urls and (not detail_url or "/listing/" not in detail_url):
-                print(f"[{i + 1}/{total_cards}] Capturing real detail URL...")
+                print(f"[{i + 1}/{max_candidates}] Capturing real detail URL...")
                 detail_url = _capture_detail_url_from_card(page, card, search_url, active_selector)
                 print(f"  detail_url: {detail_url}")
 
@@ -238,5 +302,4 @@ def save_debug_artifacts(page: Page, debug_dir: Path) -> dict[str, Path]:
         pass
 
     return {"screenshot": screenshot_path, "html": html_path}
-
 

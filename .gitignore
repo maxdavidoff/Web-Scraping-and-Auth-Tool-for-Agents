@@ -1,10 +1,11 @@
 .env
-auth/*.json
-data/raw/*.jsonl
-data/processed/*.csv
-data/debug/*.png
-data/debug/*.html
+.venv/
 __pycache__/
 *.pyc
-.venv/
 .DS_Store
+
+auth/*.json
+
+data/raw/*
+data/processed/*
+data/debug/*

@@ -7,6 +7,7 @@
     "input[name*='search' i]"
   ],
   "result_card_selectors": [
+    "#rg_listings [id^='listing-']",
     "#search-results [id^='listing-']",
     "[id^='listing-']"
   ],
