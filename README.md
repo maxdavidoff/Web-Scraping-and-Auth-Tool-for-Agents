@@ -124,7 +124,7 @@ PYTHONPATH=src python -u run_ohana_search.py \
 --selectors-file selectors.ohana.json \
 --max-listings 15 \
 --fetch-listing-api \
---scrolls 0 \
+--scrolls 0
 ```
 
 If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
