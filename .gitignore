@@ -4,6 +4,7 @@ data/raw/*.jsonl
 data/processed/*.csv
 data/debug/*.png
 data/debug/*.html
+data/debug/**/*.json
 __pycache__/
 *.pyc
 .venv/

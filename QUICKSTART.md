@@ -27,3 +27,11 @@ data/processed/
 data/raw/
 data/debug/
 ```
+
+
+AffordableHousing.com:
+
+```bash
+python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
+python run_affordablehousing_search.py --search-url "https://www.affordablehousing.com/boston-ma/" --manual-search --max-listings 20 --keep-open
+```

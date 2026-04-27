@@ -214,10 +214,55 @@ and log in again.
 5. Tighten selectors.
 6. Only then try automated search.
 
+## AffordableHousing.com tool
+
+This repo also includes a parallel AffordableHousing.com tool with the same manual-first workflow:
+
+```bash
+python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
+```
+
+Login is optional for public searches, but this saves a browser session to:
+
+```text
+auth/affordablehousing_state.json
+```
+
+Run a manual extraction test:
+
+```bash
+python run_affordablehousing_search.py \
+  --search-url "https://www.affordablehousing.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+Or build an AffordableHousing.com SEO search URL from CLI filters:
+
+```bash
+python run_affordablehousing_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --selectors-file selectors.affordablehousing.json \
+  --max-listings 20
+```
+
+Outputs appear in:
+
+```text
+data/raw/affordablehousing_results_YYYYMMDD_HHMMSS.jsonl
+data/processed/affordablehousing_results_YYYYMMDD_HHMMSS.csv
+data/debug/affordablehousing_search_page.png
+data/debug/affordablehousing_search_page.html
+```
+
+If extraction breaks, inspect `data/debug/affordablehousing_search_page.html` and update `selectors.affordablehousing.json`.
+
 ## Safety / compliance notes
 
 - Do not bypass Cloudflare, CAPTCHAs, private APIs, or security controls.
 - Keep volume low.
 - Use your own account only.
 - Do not collect private user information you are not allowed to store.
-- Do not commit `auth/ohana_state.json` or `.env`.
+- Do not commit `auth/*_state.json` or `.env`.
