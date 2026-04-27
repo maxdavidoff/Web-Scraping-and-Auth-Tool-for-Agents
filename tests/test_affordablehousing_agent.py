@@ -2,13 +2,26 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+except ModuleNotFoundError:
+    sync_playwright = None
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+from src.affordablehousing_agent.config import PROJECT_ROOT, load_selectors
 from src.affordablehousing_agent.extractor import (
     _is_useful_href,
     _model_detail_url_from_card,
+    extract_listings,
 )
 from src.affordablehousing_agent.parsing import normalize_listing
 from src.affordablehousing_agent.search_url import (
@@ -16,6 +29,9 @@ from src.affordablehousing_agent.search_url import (
     location_to_slug,
 )
 from src.affordablehousing_agent.storage import write_csv, write_jsonl
+
+DETAIL_URL_RE = re.compile(r"^https://www\.affordablehousing\.com/[a-z0-9-]+/[a-z0-9-]+-\d+/$")
+LIVE_RESULTS_URL = "https://www.affordablehousing.com/boston-ma/apartment/"
 
 
 class FakeCard:
@@ -225,6 +241,90 @@ class AffordableHousingStorageTests(unittest.TestCase):
                 csv_rows[0]["image_urls"],
                 "https://example.com/a.jpg | https://example.com/b.jpg",
             )
+
+
+class AffordableHousingLiveBrowserScrapeTests(unittest.TestCase):
+    def assert_valid_live_records(self, records: list[dict], *, expected_count: int) -> None:
+        self.assertEqual(len(records), expected_count)
+        self.assertEqual(len({record["id"] for record in records}), len(records))
+
+        for record in records:
+            with self.subTest(record=record.get("title")):
+                self.assertEqual(record["source"], "affordablehousing")
+                for field in [
+                    "title",
+                    "price",
+                    "location",
+                    "availability",
+                    "bedrooms",
+                    "bathrooms",
+                    "property_type",
+                    "url",
+                ]:
+                    self.assertTrue(record.get(field), f"missing {field}: {record}")
+
+                self.assertRegex(record["url"], DETAIL_URL_RE)
+                self.assertNotIn("javascript:", record["url"].lower())
+                self.assertNotIn("Stud-", record["bedrooms"])
+
+    @unittest.skipIf(sync_playwright is None, "Playwright is required for live browser scrape tests")
+    def test_live_browser_extracts_records_from_public_results_page(self) -> None:
+        selectors = load_selectors(PROJECT_ROOT / "selectors.affordablehousing.json")
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                page.set_default_timeout(15_000)
+                page.goto(LIVE_RESULTS_URL, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8_000)
+                except PlaywrightTimeoutError:
+                    pass
+                page.wait_for_timeout(2_000)
+
+                records = extract_listings(page, selectors, max_listings=3)
+            finally:
+                browser.close()
+
+        self.assert_valid_live_records(records, expected_count=3)
+
+    def test_live_cli_scrape_writes_jsonl_records(self) -> None:
+        command = [
+            sys.executable,
+            str(PROJECT_ROOT / "run_affordablehousing_search.py"),
+            "--location",
+            "Boston, MA",
+            "--property-types",
+            "Apartment",
+            "--max-listings",
+            "2",
+            "--scrolls",
+            "0",
+            "--headless",
+        ]
+
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=90,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        match = re.search(r"^JSONL:\s+(.*?)\s+\(2 records\)$", result.stdout, re.MULTILINE)
+        self.assertIsNotNone(match, result.stdout)
+
+        jsonl_path = Path(match.group(1))
+        records = [
+            json.loads(line)
+            for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+        self.assert_valid_live_records(records, expected_count=2)
 
 
 if __name__ == "__main__":
