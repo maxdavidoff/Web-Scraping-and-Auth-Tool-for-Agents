@@ -1,0 +1,28 @@
+{
+  "notes": "Ohana Bubble search results selectors.",
+  "search_input_selectors": [
+    "input[placeholder*='Search' i]",
+    "input[placeholder*='location' i]",
+    "input[type='search']",
+    "input[name*='search' i]"
+  ],
+  "result_card_selectors": [
+    "#search-results [id^='listing-']",
+    "[id^='listing-']"
+  ],
+  "detail_link_selectors": [
+    "a[href]"
+  ],
+  "title_selectors": [
+    ".cvhfaV3",
+    "div:has-text(\"room\")",
+    "div:has-text(\"apartment\")"
+  ],
+  "price_selectors": [
+    ".cvhfaI3",
+    "text=/\\$[0-9,]+/"
+  ],
+  "location_selectors": [
+    ".cvhfaV3"
+  ]
+}

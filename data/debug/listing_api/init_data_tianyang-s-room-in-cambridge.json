@@ -1,0 +1,57 @@
+[
+  {
+    "id": "1777241581822x269579496134259460",
+    "data": {
+      "name_text": "Bern",
+      "birthday_date": 1081054800000,
+      "last_name_text": "Nahad",
+      "gender_option_os_gender": "male",
+      "host_status_option_os_host_status": "standard",
+      "professional_host_status_option_os_professional_host_status": "standard",
+      "hometown_geographic_address": {
+        "lat": 40.7127753,
+        "lng": -74.0059728,
+        "address": "New York, NY, USA",
+        "components": {
+          "city": "New York",
+          "state": "New York",
+          "country": "United States",
+          "state code": "NY",
+          "country code": "US"
+        }
+      },
+      "time_zone_id_text": "America/New_York",
+      "ethnicity_custom_ethnicity": "1348695171700984260__LOOKUP__1728414428195x250394327519948740",
+      "authentication": {
+        "email": {
+          "email": "bernnah639@gmail.com"
+        }
+      },
+      "user_signed_up": true,
+      "beta_user_boolean": false,
+      "full_name_text": "Bern Nahad",
+      "Slug": "bern-nahad",
+      "inital_sign_in_boolean": true,
+      "onboarding_complete_boolean": true,
+      "Created Date": 1777241581822,
+      "Modified Date": 1777262471443,
+      "most_recent_login_date": 1777241982830,
+      "log_in_via1_text": "email",
+      "text_notifications__boolean": true,
+      "email_notifications_boolean": true,
+      "outreach_preference_option_os_outreach_preference": "email",
+      "phone_number_custom_phone_number1": "1348695171700984260__LOOKUP__1777241710962x427916740908423040",
+      "date_tos_first_accepted_date": 1777241710445,
+      "date_tos_last_accepted_date": 1777241710445,
+      "payout_type_option_os_payout_type": "stripe_connect_payouts",
+      "country_custom_country2": "1348695171700984260__LOOKUP__1725899004508x389770734239944800",
+      "type_option_os_user_type": "user",
+      "disabled__boolean": false,
+      "full_name_db_text": "bern nahad",
+      "email_db_text": "bernnah639@gmail.com",
+      "last_active_date": 1777262471158
+    },
+    "type": "user",
+    "version": 277388975
+  }
+]

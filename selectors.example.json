@@ -1,0 +1,36 @@
+{
+  "notes": "These selectors are intentionally editable. Start in --manual-search mode first, then inspect data/debug/search_page.html and update selectors if needed.",
+  "search_input_selectors": [
+    "input[placeholder*='Search' i]",
+    "input[placeholder*='location' i]",
+    "input[type='search']",
+    "input[name*='search' i]"
+  ],
+  "result_card_selectors": [
+    "[data-testid*='listing' i]",
+    "[class*='listing' i]",
+    "[class*='card' i]",
+    "article"
+  ],
+  "detail_link_selectors": [
+    "a[href*='/listing']",
+    "a[href*='/sublet']",
+    "a[href]"
+  ],
+  "title_selectors": [
+    "[data-testid*='title' i]",
+    "[class*='title' i]",
+    "h1",
+    "h2",
+    "h3"
+  ],
+  "price_selectors": [
+    "[data-testid*='price' i]",
+    "[class*='price' i]"
+  ],
+  "location_selectors": [
+    "[data-testid*='location' i]",
+    "[class*='location' i]",
+    "[class*='address' i]"
+  ]
+}

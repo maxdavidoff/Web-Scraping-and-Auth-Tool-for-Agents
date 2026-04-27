@@ -1,0 +1,215 @@
+# Ohana Search Agent — Simple Playwright Starter
+
+This is a small, test-first browser automation project for logging into Ohana with your own account, running a search, extracting visible listing-card information, and saving results to files.
+
+It intentionally does **not** bypass Cloudflare, CAPTCHAs, login protections, private APIs, or rate limits. Use it only with an account you are allowed to use and only at low, human-like volume.
+
+## What it does
+
+1. Opens Ohana in a real Chromium browser.
+2. Lets you log in manually once.
+3. Saves the browser session to `auth/ohana_state.json`.
+4. Reuses that session to open a search page.
+5. Either:
+   - lets you perform the search manually, or
+   - tries to fill a search box using editable selectors.
+6. Extracts likely listing cards from the visible search results.
+7. Saves:
+   - raw JSONL to `data/raw/`
+   - readable CSV to `data/processed/`
+   - screenshot + HTML debug files to `data/debug/`
+
+## Folder structure
+
+```text
+ohana_search_agent/
+  auth/
+    ohana_state.json              # created after login; gitignored
+
+  data/
+    raw/                          # JSONL results
+    processed/                    # CSV results
+    debug/                        # screenshot + HTML snapshots
+
+  src/ohana_agent/
+    browser.py                    # Playwright browser/session helpers
+    config.py                     # settings and paths
+    extractor.py                  # DOM extraction logic
+    parsing.py                    # field normalization / regex guesses
+    storage.py                    # JSONL + CSV writers
+
+  save_ohana_login.py             # Step 1: save login session
+  run_ohana_search.py             # Step 2: run/extract search
+  selectors.example.json          # editable selectors
+  requirements.txt
+  .env.example
+  .gitignore
+```
+
+## Setup
+
+From inside this folder:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+Optional: copy `.env.example` to `.env` and edit defaults:
+
+```bash
+cp .env.example .env
+```
+
+## Step 1 — Save your Ohana login session
+
+```bash
+python save_ohana_login.py --start-url "https://liveohana.ai/"
+```
+
+A browser will open. Log in normally. When you can see your logged-in account/search page, return to the terminal and press ENTER.
+
+This creates:
+
+```text
+auth/ohana_state.json
+```
+
+Do **not** commit that file to GitHub.
+
+## Step 2 — Run a manual test search
+
+Start here first. This is the most reliable testing path because you manually perform the search in the browser, then the script extracts whatever results are visible.
+
+```bash
+python run_ohana_search.py \
+  --search-url "https://liveohana.ai/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+When the browser opens:
+
+1. Navigate/search/filter however you normally would on Ohana.
+2. Wait until the result cards are visible.
+3. Return to the terminal and press ENTER.
+4. The script extracts visible cards and saves files.
+
+Outputs appear in:
+
+```text
+data/raw/ohana_results_YYYYMMDD_HHMMSS.jsonl
+data/processed/ohana_results_YYYYMMDD_HHMMSS.csv
+data/debug/search_page.png
+data/debug/search_page.html
+```
+
+## Step 3 — Try automated search
+
+After manual extraction works, you can try automated search input filling:
+
+```bash
+python run_ohana_search.py \
+  --search-url "https://liveohana.ai/" \
+  --location "Philadelphia" \
+  --max-listings 20 \
+  --keep-open
+```
+
+If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
+
+## Updating selectors
+
+Open:
+
+```text
+data/debug/search_page.html
+```
+
+Find the listing card HTML and update `selectors.example.json`, especially:
+
+```json
+"result_card_selectors": [
+  "[data-testid*='listing' i]",
+  "[class*='listing' i]",
+  "[class*='card' i]",
+  "article"
+]
+```
+
+The extraction logic is intentionally heuristic at first. It tries to identify likely cards, then guesses fields like title, price, bedrooms, dates, URL, and image URLs.
+
+For a more accurate second version, inspect the debug HTML and replace the generic selectors with exact Ohana selectors.
+
+## Example output record
+
+```json
+{
+  "id": "7cc9b46c8c0e0b9d",
+  "source": "ohana",
+  "title": "Room in University City apartment",
+  "price": "$1,250/mo",
+  "location": "Philadelphia, PA",
+  "dates": "May 15 - Aug 20",
+  "bedrooms": "1 bed",
+  "url": "https://liveohana.ai/...",
+  "image_urls": ["https://..."],
+  "scraped_at": "2026-04-26T12:00:00+00:00",
+  "raw_text": "Full visible listing card text..."
+}
+```
+
+## Common issues
+
+### `ModuleNotFoundError: No module named 'playwright'`
+
+Make sure your virtual environment is active and dependencies are installed:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+### No results extracted
+
+Check:
+
+```text
+data/debug/search_page.png
+data/debug/search_page.html
+```
+
+If the screenshot does not show results, run again with `--manual-search` and make sure results are visible before pressing ENTER.
+
+If the screenshot shows results but CSV is empty, update `result_card_selectors` in `selectors.example.json`.
+
+### Login expired
+
+Run:
+
+```bash
+python save_ohana_login.py
+```
+
+and log in again.
+
+## Recommended testing workflow
+
+1. Run `save_ohana_login.py`.
+2. Run `run_ohana_search.py --manual-search --keep-open`.
+3. Check the CSV.
+4. Check `data/debug/search_page.html` if extraction is wrong.
+5. Tighten selectors.
+6. Only then try automated search.
+
+## Safety / compliance notes
+
+- Do not bypass Cloudflare, CAPTCHAs, private APIs, or security controls.
+- Keep volume low.
+- Use your own account only.
+- Do not collect private user information you are not allowed to store.
+- Do not commit `auth/ohana_state.json` or `.env`.
