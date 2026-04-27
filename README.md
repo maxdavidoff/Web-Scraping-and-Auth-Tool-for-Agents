@@ -112,11 +112,19 @@ data/debug/search_page.html
 After manual extraction works, you can try automated search input filling:
 
 ```bash
-python run_ohana_search.py \
-  --search-url "https://liveohana.ai/" \
-  --location "Philadelphia" \
-  --max-listings 20 \
-  --keep-open
+PYTHONPATH=src python -u run_ohana_search.py \
+--location "Boston, MA, USA" \
+--movein "May 1, 2026" \
+--moveout "May 31, 2026" \
+--property-types Apartment House \
+--type-of-places "Private room" \
+--num-bedrooms 1 \
+--min-price 1000 \
+--max-price 3000 \
+--selectors-file selectors.ohana.json \
+--max-listings 15 \
+--fetch-listing-api \
+--scrolls 0 \
 ```
 
 If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
