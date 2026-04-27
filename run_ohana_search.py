@@ -2,44 +2,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
-from pathlib import Path
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-from src.ohana_agent.browser import build_context, save_storage_state
-from src.ohana_agent.config import DEBUG_DIR, PROCESSED_DIR, RAW_DIR, ensure_dirs, get_settings, load_selectors
-from src.ohana_agent.extractor import extract_listings, save_debug_artifacts
-from src.ohana_agent.storage import write_csv, write_jsonl
-
-from src.ohana_agent.search_url import build_ohana_search_url
-from src.ohana_agent.listing_api import (
-    build_init_data_url,
-    fetch_listing_init_data,
-    extract_address_geographic_address,
-)
-
-
-def try_automated_search(page, location: str, selectors: dict) -> bool:
-    search_input_selectors = selectors.get("search_input_selectors", [])
-    for selector in search_input_selectors:
-        try:
-            loc = page.locator(selector).first
-            if loc.count() == 0:
-                continue
-            loc.click(timeout=2_000)
-            loc.fill(location, timeout=3_000)
-            loc.press("Enter", timeout=3_000)
-            return True
-        except Exception:
-            continue
-    return False
-
-
-def scroll_for_results(page, scrolls: int, pause_ms: int) -> None:
-    for _ in range(max(scrolls, 0)):
-        page.mouse.wheel(0, 2200)
-        page.wait_for_timeout(pause_ms)
+from src.ohana_agent.search_runner import OhanaSearchOptions, run_ohana_search
 
 
 def main() -> None:
@@ -84,14 +48,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    ensure_dirs()
-    if args.search_url:
-        search_url = args.search_url
-    else:
-        if not args.location:
-            raise ValueError("Provide either --search-url or --location.")
-
-        search_url = build_ohana_search_url(
+    run_ohana_search(
+        OhanaSearchOptions(
+            search_url=args.search_url,
+            state_file=args.state_file,
+            selectors_file=args.selectors_file,
+            max_listings=args.max_listings,
+            scrolls=args.scrolls,
+            headless=args.headless,
+            manual_search=args.manual_search,
+            keep_open=args.keep_open,
+            fetch_listing_api=args.fetch_listing_api,
             location=args.location,
             movein=args.movein,
             moveout=args.moveout,
@@ -102,133 +69,9 @@ def main() -> None:
             max_price=args.max_price,
             pet_policy=args.pet_policy,
             furnished_status=args.furnished_status,
+            capture_detail_urls=args.capture_detail_urls,
         )
-
-    print(f"Using search URL: {search_url}")
-
-    settings = get_settings(
-        search_url=search_url,
-        location=args.location,
-        state_file=args.state_file,
-        selectors_file=args.selectors_file,
     )
-
-    selectors = load_selectors(settings.selectors_file)
-
-    if not settings.state_file.exists():
-        raise FileNotFoundError(
-            f"No saved login session found at {settings.state_file}. Run: python save_ohana_login.py"
-        )
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    raw_output = RAW_DIR / f"ohana_results_{timestamp}.jsonl"
-    csv_output = PROCESSED_DIR / f"ohana_results_{timestamp}.csv"
-
-    playwright, browser, context, page = build_context(
-        headless=args.headless,
-        state_file=settings.state_file,
-        slow_mo_ms=100,
-    )
-    try:
-        print(f"Opening search page: {search_url}")
-        page.goto(search_url, wait_until="domcontentloaded")    
-        page.wait_for_timeout(2_000)
-
-        if args.manual_search:
-            print("\nRun the search manually in the browser window.")
-            print("When the results are visible, return here and press ENTER.")
-            input("Press ENTER to extract visible results... ")
-        else:
-            if "/search?" in search_url:
-                print("Using filtered search URL directly; skipping automated search input.")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8_000)
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(3_000)
-            else:
-                print(f"Trying automated search for: {settings.location}")
-                ok = try_automated_search(page, settings.location, selectors)
-                if not ok:
-                    print("Could not find a search input with the current selectors.")
-                    print("Run again with --manual-search or edit selectors.example.json.")
-                    input("Run the search manually now, then press ENTER to extract visible results... ")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8_000)
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(2_000)
-
-        scroll_for_results(page, args.scrolls, pause_ms=1_000)
-        debug = save_debug_artifacts(page, DEBUG_DIR)
-        print("Calling extract_listings...")
-        records = extract_listings(
-            page,
-            selectors,
-            max_listings=args.max_listings,
-            capture_detail_urls=args.capture_detail_urls or args.fetch_listing_api,
-        )
-
-        if args.fetch_listing_api:
-            print("\nFetching listing init/data for each extracted record...")
-
-            for i, record in enumerate(records, start=1):
-                detail_url = record.get("detail_url") or record.get("url")
-
-                print(f"[{i}/{len(records)}] {record.get('title', 'Untitled listing')}")
-                print(f"  detail_url: {detail_url}")
-
-                if not detail_url or "/listing/" not in detail_url:
-                    record["listing_api_status"] = "skipped_no_detail_url"
-                    print("  skipped: no real listing URL")
-                    continue
-
-                try:
-                    data = fetch_listing_init_data(page, detail_url)
-                    location_data = extract_address_geographic_address(data)
-
-                    record["init_data_url"] = build_init_data_url(detail_url)
-
-                    if location_data:
-                        record.update(location_data)
-                        record["listing_api_status"] = "ok"
-                        print(
-                            f"  exact location: "
-                            f"{record.get('listing_latitude')}, "
-                            f"{record.get('listing_longitude')}"
-                        )
-                        print(f"  address: {record.get('listing_address')}")
-                    else:
-                        record["listing_api_status"] = "ok_no_address_geographic_address_found"
-                        print("  API worked, but no address_geographic_address found")
-
-                except Exception as e:
-                    record["listing_api_status"] = "failed"
-                    record["listing_api_error"] = str(e)
-                    print(f"  failed: {e}")
-
-                page.wait_for_timeout(500)
-
-        jsonl_count = write_jsonl(records, raw_output)
-        csv_count = write_csv(records, csv_output)
-        save_storage_state(context, settings.state_file)
-
-        print("\nDone.")
-        print(f"Extracted records: {len(records)}")
-        print(f"JSONL: {raw_output} ({jsonl_count} records)")
-        print(f"CSV:   {csv_output} ({csv_count} records)")
-        print(f"Debug screenshot: {debug.get('screenshot')}")
-        print(f"Debug HTML:       {debug.get('html')}")
-        if len(records) == 0:
-            print("\nNo records were extracted. Open data/debug/search_page.html, inspect the listing card HTML,")
-            print("then update selectors.example.json and rerun with --manual-search.")
-
-        if args.keep_open:
-            input("\nPress ENTER to close the browser... ")
-    finally:
-        context.close()
-        browser.close()
-        playwright.stop()
 
 
 if __name__ == "__main__":

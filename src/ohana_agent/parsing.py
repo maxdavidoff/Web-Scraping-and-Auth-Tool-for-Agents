@@ -7,10 +7,19 @@ from urllib.parse import urljoin
 
 PRICE_RE = re.compile(r"\$\s?[\d,]+(?:\s*/\s?(?:mo|month|m|week|wk|night|day))?", re.I)
 BED_RE = re.compile(r"\b(?:studio|\d+\s*(?:br|bed|beds|bedroom|bedrooms))\b", re.I)
+BED_ICON_RE = re.compile(r"(?:^|\n)\s*bed\s*\n\s*(\d+(?:\.\d+)?)\b", re.I)
 DATE_RE = re.compile(
     r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:\s*[-–]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)?[a-z]*\.?\s*\d{1,2})?\b",
     re.I,
 )
+ICON_TEXT = {
+    "bed",
+    "chevron_left",
+    "chevron_right",
+    "keyboard_arrow_right",
+    "shower",
+}
+TITLE_HINT_RE = re.compile(r"\b(?:room|apartment|house|studio|sublet)\b", re.I)
 
 
 def clean_text(text: str | None) -> str:
@@ -32,7 +41,16 @@ def guess_title(raw_text: str) -> str:
     if not lines:
         return ""
     for line in lines:
-        if len(line) >= 8 and not PRICE_RE.fullmatch(line):
+        if line.lower() in ICON_TEXT:
+            continue
+        if PRICE_RE.fullmatch(line) or DATE_RE.search(line):
+            continue
+        if TITLE_HINT_RE.search(line):
+            return line[:160]
+    for line in lines:
+        if line.lower() in ICON_TEXT:
+            continue
+        if len(line) >= 8 and not PRICE_RE.fullmatch(line) and not DATE_RE.search(line):
             return line[:160]
     return lines[0][:160]
 
@@ -44,7 +62,16 @@ def guess_price(raw_text: str) -> str:
 
 def guess_bedrooms(raw_text: str) -> str:
     match = BED_RE.search(raw_text)
-    return clean_text(match.group(0)) if match else ""
+    if match:
+        return clean_text(match.group(0))
+
+    icon_match = BED_ICON_RE.search(raw_text)
+    if icon_match:
+        number = icon_match.group(1)
+        suffix = "bed" if number == "1" else "beds"
+        return f"{number} {suffix}"
+
+    return ""
 
 
 def guess_dates(raw_text: str) -> str:
