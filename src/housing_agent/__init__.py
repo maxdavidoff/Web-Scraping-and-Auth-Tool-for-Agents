@@ -44,6 +44,13 @@ from .readiness_evaluator import (
     evaluate_search_readiness,
     readiness_from_mapping,
 )
+from .topic_guard import (
+    TOPIC_GUARD_SYSTEM_PROMPT,
+    MessageTopicResult,
+    build_topic_guard_messages,
+    evaluate_message_topic,
+    topic_result_from_mapping,
+)
 from .types import (
     FilterApplicationReport,
     FilterCapability,
@@ -79,11 +86,13 @@ __all__ = [
     "INTENT_UPDATE_SYSTEM_PROMPT",
     "LISTING_RANKER_SYSTEM_PROMPT",
     "READINESS_SYSTEM_PROMPT",
+    "TOPIC_GUARD_SYSTEM_PROMPT",
     "AgentTurn",
     "InteractiveHousingAgent",
     "IntentExtractionResult",
     "LLMClientError",
     "ListingRankingResult",
+    "MessageTopicResult",
     "MistralChatClient",
     "NormalizedListing",
     "ProviderCapabilities",
@@ -98,10 +107,12 @@ __all__ = [
     "build_intent_update_messages",
     "build_listing_ranker_messages",
     "build_readiness_messages",
+    "build_topic_guard_messages",
     "capability_matrix",
     "classify_filters",
     "coerce_intent",
     "evaluate_search_readiness",
+    "evaluate_message_topic",
     "extract_housing_intent",
     "get_provider_capabilities",
     "intent_from_mapping",
@@ -114,5 +125,6 @@ __all__ = [
     "readiness_from_mapping",
     "requested_filters",
     "score_provider_query",
+    "topic_result_from_mapping",
     "update_housing_intent",
 ]

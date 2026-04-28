@@ -8,22 +8,23 @@ Supported search markets are currently Boston, MA; New York, NY; Washington, DC;
 
 ## What it does
 
-1. Extracts or updates a provider-neutral `HousingSearchIntent` from user language.
-2. Evaluates search readiness: what is required, what is flexible, and whether a follow-up is useful.
-3. Builds a deterministic provider-aware query plan for:
+1. Checks that each chat message is on-topic for rental housing before updating search state.
+2. Extracts or updates a provider-neutral `HousingSearchIntent` from user language.
+3. Evaluates search readiness: what is required, what is flexible, and whether a follow-up is useful.
+4. Builds a deterministic provider-aware query plan for:
    - Ohana
    - RentalSource
    - AffordableHousing.com
-4. Shows the user which provider should run first and why.
-5. Executes only after explicit confirmation.
-6. Routes execution through the deterministic provider router, not through the LLM.
-7. Ranks returned listings against the user intent without inventing missing facts.
-8. Saves scraper outputs:
+5. Shows the user which provider should run first and why.
+6. Executes only after explicit confirmation.
+7. Routes execution through the deterministic provider router, not through the LLM.
+8. Ranks returned listings against the user intent without inventing missing facts.
+9. Saves scraper outputs:
    - raw JSONL to `data/raw/`
    - readable CSV to `data/processed/`
    - screenshot + HTML debug files to `data/debug/`
 
-The LLM is used for language understanding, search readiness, and result-fit explanation. Deterministic code owns provider ranking, URL/query construction, confirmation state, and scraper execution.
+The LLM is used for topic checks, language understanding, search readiness, and result-fit explanation. Deterministic code owns provider ranking, URL/query construction, confirmation state, and scraper execution.
 
 ## Folder structure
 
@@ -156,6 +157,7 @@ The safe agent flow is:
 
 ```text
 user conversation
+  -> LLM checks whether the latest message is rental-housing related
   -> LLM updates full merged HousingSearchIntent
   -> LLM evaluates SearchReadiness
   -> deterministic query planner ranks providers and explains filter application

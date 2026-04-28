@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from src.housing_agent.interactive_agent import BACKUP_PROVIDER_SCORE_RATIO, InteractiveHousingAgent
+from src.housing_agent.topic_guard import MessageTopicResult
 from src.housing_agent.types import ListingRankingResult, RankedListing, SearchReadiness
 
 
@@ -19,6 +20,8 @@ class FakeJsonClient:
         self.calls = []
 
     def complete_json(self, messages, *, temperature=0.0, max_tokens=1200):
+        if "housing-message topic guard" in messages[0].get("content", ""):
+            return json.dumps({"is_on_topic": True, "confidence": "high"})
         self.calls.append(
             {
                 "messages": messages,
@@ -142,6 +145,34 @@ def fake_listing_ranker(intent, readiness, records, **kwargs):
 class InteractiveHousingAgentTests(unittest.TestCase):
     def test_backup_provider_threshold_is_pinned(self) -> None:
         self.assertEqual(BACKUP_PROVIDER_SCORE_RATIO, 0.60)
+
+    def test_off_topic_message_is_blocked_before_intent_update(self) -> None:
+        client = FakeJsonClient(
+            [
+                {
+                    "location": "Boston, MA",
+                    "property_types": ["Apartment"],
+                    "intent_kind": "general_rental",
+                }
+            ]
+        )
+        agent = InteractiveHousingAgent(
+            client=client,
+            topic_evaluator=lambda *args, **kwargs: MessageTopicResult(
+                is_on_topic=False,
+                confidence="high",
+                reasoning_summary="The message is not about rental housing.",
+            ),
+        )
+
+        turn = agent.handle_user_message("write me a song about toast")
+
+        self.assertEqual(turn.state, "off_topic")
+        self.assertIn("rental housing", turn.message)
+        self.assertIn("rental details again", turn.message)
+        self.assertEqual(agent.transcript, [])
+        self.assertIsNone(agent.current_intent)
+        self.assertEqual(len(client.responses), 1)
 
     def test_missing_location_triggers_clarification(self) -> None:
         agent = InteractiveHousingAgent(

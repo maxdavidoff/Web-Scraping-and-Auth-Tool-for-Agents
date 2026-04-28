@@ -658,6 +658,7 @@ function labelForState(value) {
     planned: "Planned",
     execution_confirmation_requested: "Ready to run",
     executed: "Executed",
+    off_topic: "Off topic",
     blocked: "Blocked",
     error: "Error",
     reset: "Reset",

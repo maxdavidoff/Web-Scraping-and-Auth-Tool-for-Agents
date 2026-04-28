@@ -20,6 +20,8 @@ class FakeJsonClient:
         self.responses = list(responses)
 
     def complete_json(self, messages, *, temperature=0.0, max_tokens=1200):
+        if "housing-message topic guard" in messages[0].get("content", ""):
+            return json.dumps({"is_on_topic": True, "confidence": "high"})
         if not self.responses:
             raise AssertionError("FakeJsonClient response queue is empty")
         return json.dumps(self.responses.pop(0))

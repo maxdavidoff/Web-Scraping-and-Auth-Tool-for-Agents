@@ -18,12 +18,14 @@ from .search_app import (
     query_plan_to_dict,
     user_visible_warnings,
 )
+from .topic_guard import MessageTopicResult, evaluate_message_topic
 from .types import HousingSearchIntent, ListingRankingResult, QueryPlan, RankedListing, SearchReadiness
 
 
 AgentRunner = Callable[..., Any]
 ReadinessEvaluator = Callable[..., SearchReadiness]
 ListingRanker = Callable[..., ListingRankingResult]
+TopicEvaluator = Callable[..., MessageTopicResult]
 BACKUP_PROVIDER_SCORE_RATIO = 0.60
 
 HELP_TEXT = """
@@ -65,6 +67,7 @@ class InteractiveHousingAgent:
         runner: AgentRunner = run_provider_searches,
         readiness_evaluator: ReadinessEvaluator = evaluate_search_readiness,
         listing_ranker: ListingRanker = rank_listings,
+        topic_evaluator: TopicEvaluator = evaluate_message_topic,
         today: str | None = None,
         max_listings: int = 10,
         scrolls: int = 3,
@@ -80,6 +83,7 @@ class InteractiveHousingAgent:
         self.runner = runner
         self.readiness_evaluator = readiness_evaluator
         self.listing_ranker = listing_ranker
+        self.topic_evaluator = topic_evaluator
         self.today = today
         self.max_listings = max_listings
         self.scrolls = scrolls
@@ -116,6 +120,37 @@ class InteractiveHousingAgent:
         command_turn = self._handle_command(message)
         if command_turn is not None:
             return command_turn
+
+        try:
+            topic_result = self.topic_evaluator(
+                message,
+                client=self.client,
+                model=self.model,
+                current_intent=self.current_intent,
+                transcript=self.transcript,
+                today=self.today,
+            )
+        except Exception as exc:
+            return AgentTurn(
+                state="error",
+                message=f"I could not check whether this is about rental housing: {exc}",
+                intent=self.current_intent,
+                search_readiness=self.latest_readiness,
+                query_plan=self.latest_plan,
+                json_payload=self.current_state_payload(),
+            )
+
+        if not topic_result.is_on_topic:
+            self.pending_execution_confirmation = False
+            self.proposed_execution_providers = ()
+            return AgentTurn(
+                state="off_topic",
+                message=self._off_topic_message(topic_result),
+                intent=self.current_intent,
+                search_readiness=self.latest_readiness,
+                query_plan=self.latest_plan,
+                json_payload=self.current_state_payload(),
+            )
 
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
@@ -627,6 +662,20 @@ class InteractiveHousingAgent:
             query_plan=self.latest_plan,
             json_payload=self.current_state_payload(),
         )
+
+    def _off_topic_message(self, topic_result: MessageTopicResult) -> str:
+        lines = ["Let's keep this focused on rental housing."]
+        questions = self.latest_readiness.followup_questions if self.latest_readiness else ()
+        if questions:
+            lines.append("Please answer the rental questions again:")
+            lines.extend(f"- {question}" for question in questions[:2])
+        else:
+            lines.append(
+                "Please answer with the rental details again: city, budget, housing type, and timing."
+            )
+        if topic_result.reasoning_summary:
+            lines.append(f"Reason: {topic_result.reasoning_summary}")
+        return "\n".join(lines)
 
     def _readiness_followup(self) -> str | None:
         if not self.current_intent:
