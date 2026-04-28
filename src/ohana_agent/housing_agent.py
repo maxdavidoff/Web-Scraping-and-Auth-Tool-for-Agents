@@ -5,9 +5,13 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any
 
+from .config import PROCESSED_DIR
+from .decision_packet import CampusLocation, create_housing_decision_packet
 from .search_runner import OhanaSearchOptions, OhanaSearchResult, run_ohana_search
+from .storage import write_json
 
 
 DEFAULT_AGENT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -35,6 +39,8 @@ class StudentHousingAgentResult:
     plan: StudentHousingSearchPlan
     search: OhanaSearchResult
     summary: str
+    decision_packet: dict[str, Any] | None = None
+    decision_packet_output: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,25 @@ SUMMARY_SYSTEM_PROMPT = """
 You help students compare housing results. Be concise, practical, and honest.
 Use only the supplied listing data. Do not invent amenities, distances, safety
 claims, availability, or contact details. If results are thin or noisy, say so.
+""".strip()
+
+
+FOLLOW_UP_QUESTION_SYSTEM_PROMPT = """
+You generate decision-driving follow-up questions for a student comparing
+housing options. Use only the supplied decision packet data. Do not invent
+commutes, amenities, neighborhood facts, safety claims, or availability.
+
+Return one JSON object with exactly this shape:
+{"questions":[{"question":"...","why":"...","option_ids":["..."]}]}
+
+Rules:
+- Write 3 to 5 questions.
+- Each question should emphasize an actual difference between options, such as
+  price versus campus distance, furnished versus unfurnished, move-in timing,
+  stronger photos, amenity gaps, or whether to enrich neighborhood data first.
+- Ask concise questions that help the student decide or choose the next zoom-in.
+- Use option_ids only from the supplied options.
+- If data is missing, ask whether to run the specific enrichment before ranking.
 """.strip()
 
 
@@ -443,6 +468,91 @@ def summarize_housing_results(
     return (response.choices[0].message.content or "").strip()
 
 
+def generate_decision_follow_up_questions(
+    *,
+    decision_packet: dict[str, Any],
+    model: str = DEFAULT_AGENT_MODEL,
+) -> list[dict[str, Any]]:
+    ranked_options = decision_packet.get("ranked_options", [])
+    if not ranked_options:
+        return []
+
+    compact_options = [
+        {
+            "id": option.get("id"),
+            "title": option.get("title"),
+            "price": option.get("price"),
+            "price_amount": option.get("price_amount"),
+            "distance_to_campus_miles": option.get("distance_to_campus_miles"),
+            "move_in_dates": option.get("move_in_dates"),
+            "bedrooms": option.get("bedrooms"),
+            "amenities": option.get("amenities", [])[:8],
+            "fit_signals": option.get("fit_signals", []),
+            "concerns": option.get("concerns", []),
+            "score": option.get("score"),
+        }
+        for option in ranked_options[: min(len(ranked_options), 8)]
+    ]
+
+    client = _openai_client()
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0.25,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": FOLLOW_UP_QUESTION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "student_request": decision_packet.get("student_request"),
+                        "decision_weights": decision_packet.get("decision_weights"),
+                        "missing_data": decision_packet.get("missing_data"),
+                        "suggested_next_tool_calls": decision_packet.get("suggested_next_tool_calls"),
+                        "options": compact_options,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+    )
+
+    data = _json_from_text(response.choices[0].message.content or "{}")
+    questions = data.get("questions")
+    if not isinstance(questions, list):
+        return []
+
+    valid_ids = {str(option.get("id")) for option in compact_options if option.get("id")}
+    cleaned: list[dict[str, Any]] = []
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        question = _optional_string(item.get("question"))
+        if not question:
+            continue
+        option_ids = [
+            str(option_id)
+            for option_id in item.get("option_ids", [])
+            if str(option_id) in valid_ids
+        ]
+        cleaned.append(
+            {
+                "question": question,
+                "why": _optional_string(item.get("why")) or "",
+                "option_ids": option_ids,
+            }
+        )
+
+    return cleaned[:5]
+
+
+def decision_packet_output_path(search: OhanaSearchResult) -> Path:
+    stem = search.csv_output.stem.replace("ohana_results", "housing_decision_packet")
+    if stem == search.csv_output.stem:
+        stem = f"housing_decision_packet_{search.csv_output.stem}"
+    return PROCESSED_DIR / f"{stem}.json"
+
+
 def run_student_housing_agent(
     user_request: str,
     *,
@@ -455,6 +565,10 @@ def run_student_housing_agent(
     fetch_listing_api: bool = False,
     capture_detail_urls: bool = False,
     summarize: bool = True,
+    build_decision_packet: bool = True,
+    campus_location: str | None = None,
+    campus_latitude: float | None = None,
+    campus_longitude: float | None = None,
 ) -> StudentHousingAgentResult:
     plan = plan_student_housing_search(user_request, model=model)
     search = run_ohana_search(
@@ -481,4 +595,36 @@ def run_student_housing_agent(
         except Exception as exc:
             summary = f"Summary unavailable after scraping: {exc}"
 
-    return StudentHousingAgentResult(plan=plan, search=search, summary=summary)
+    decision_packet: dict[str, Any] | None = None
+    packet_output: Path | None = None
+    if build_decision_packet:
+        campus = CampusLocation(
+            label=campus_location or plan.location,
+            latitude=campus_latitude,
+            longitude=campus_longitude,
+        )
+        decision_packet = create_housing_decision_packet(
+            user_request=user_request,
+            search_plan=asdict(plan),
+            records=search.records,
+            campus=campus,
+        )
+        try:
+            generated_questions = generate_decision_follow_up_questions(
+                decision_packet=decision_packet,
+                model=model,
+            )
+            if generated_questions:
+                decision_packet["recommended_follow_up_questions"] = generated_questions
+        except Exception as exc:
+            decision_packet["follow_up_question_generation_error"] = str(exc)
+
+        packet_output = write_json(decision_packet, decision_packet_output_path(search))
+
+    return StudentHousingAgentResult(
+        plan=plan,
+        search=search,
+        summary=summary,
+        decision_packet=decision_packet,
+        decision_packet_output=packet_output,
+    )

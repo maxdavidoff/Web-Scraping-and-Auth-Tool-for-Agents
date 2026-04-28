@@ -155,13 +155,19 @@ The agent will:
 4. Stop asking questions when the student says something like "that's all", "done", or "search now".
 5. Build the Ohana filtered search URL and scrape automatically.
 6. Save CSV/JSONL outputs and produce a short student-facing summary.
+7. Build a structured housing decision packet with map markers, ranked options,
+   comparison rows, missing-data flags, LLM-generated follow-up questions, and
+   suggested enrichment calls for commutes, nearby places, and amenities.
 
 You can seed the intake with an initial request:
 
 ```bash
 python run_housing_agent.py \
   "I'm a Northeastern student looking for a furnished private room in Boston under $1800" \
-  --max-listings 10
+  --max-listings 10 \
+  --campus-location "Northeastern University" \
+  --campus-latitude 42.3398 \
+  --campus-longitude -71.0892
 ```
 
 To skip follow-up questions and use the older one-shot behavior:
@@ -187,11 +193,13 @@ result = run_student_housing_agent(
     "Private room near Harvard under $1700 from June 1 to August 31, 2026",
     max_listings=10,
     fetch_listing_api=True,
+    campus_location="Harvard University",
 )
 
 print(result.plan)
 print(result.search.records)
 print(result.summary)
+print(result.decision_packet)
 ```
 
 ## Updating selectors

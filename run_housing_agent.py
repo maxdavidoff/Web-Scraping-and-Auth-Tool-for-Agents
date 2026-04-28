@@ -36,6 +36,10 @@ def main() -> None:
         help="Click each listing card and capture the real /listing/... URL.",
     )
     parser.add_argument("--no-summary", action="store_true", help="Skip the LLM summary after scraping.")
+    parser.add_argument("--no-decision-packet", action="store_true", help="Skip the structured post-processing decision packet.")
+    parser.add_argument("--campus-location", default=None, help="Campus label/address for map and commute enrichment.")
+    parser.add_argument("--campus-latitude", type=float, default=None, help="Campus latitude if already known.")
+    parser.add_argument("--campus-longitude", type=float, default=None, help="Campus longitude if already known.")
     args = parser.parse_args()
 
     seed_request = " ".join(args.request).strip()
@@ -63,6 +67,10 @@ def main() -> None:
         fetch_listing_api=args.fetch_listing_api,
         capture_detail_urls=args.capture_detail_urls,
         summarize=not args.no_summary,
+        build_decision_packet=not args.no_decision_packet,
+        campus_location=args.campus_location,
+        campus_latitude=args.campus_latitude,
+        campus_longitude=args.campus_longitude,
     )
 
     print("\nSearch plan:")
@@ -74,6 +82,24 @@ def main() -> None:
     if result.summary:
         print("\nStudent-facing summary:")
         print(result.summary)
+
+    if result.decision_packet_output:
+        print(f"\nDecision packet JSON: {result.decision_packet_output}")
+
+    if result.decision_packet:
+        questions = result.decision_packet.get("recommended_follow_up_questions", [])
+        if questions:
+            print("\nDecision-driving follow-up questions:")
+            for index, question in enumerate(questions, start=1):
+                print(f"{index}. {question.get('question')}")
+                if question.get("why"):
+                    print(f"   Why: {question.get('why')}")
+
+        suggested_calls = result.decision_packet.get("suggested_next_tool_calls", [])
+        if suggested_calls:
+            print("\nSuggested next tool calls:")
+            for call in suggested_calls:
+                print(f"- {call.get('tool')}: {call.get('reason')}")
 
 
 if __name__ == "__main__":
