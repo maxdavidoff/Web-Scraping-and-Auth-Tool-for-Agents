@@ -68,6 +68,12 @@ Plan the user-facing search experience without scraping:
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
 ```
 
+Try the interactive chat agent:
+
+```bash
+python run_housing_chat.py --max-listings 5
+```
+
 Execute only when you explicitly want live scrapers to run:
 
 ```bash

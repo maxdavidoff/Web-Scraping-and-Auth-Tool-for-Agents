@@ -7,9 +7,11 @@ from unittest.mock import patch
 
 from src.housing_agent.intent_extractor import (
     build_intent_messages,
+    build_intent_update_messages,
     extract_housing_intent,
     intent_from_mapping,
     parse_json_object,
+    update_housing_intent,
 )
 from src.housing_agent.llm_client import DEFAULT_MISTRAL_MODEL, LLMClientError, MistralChatClient
 from src.housing_agent.provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
@@ -135,6 +137,48 @@ class IntentExtractorTests(unittest.TestCase):
         self.assertEqual(result.query_plan.ranked_provider_names[0], OHANA)
         self.assertEqual(len(fake.calls), 1)
         self.assertEqual(fake.calls[0]["temperature"], 0.0)
+
+    def test_update_housing_intent_asks_for_full_merged_intent_with_newer_override(self) -> None:
+        previous = intent_from_mapping(
+            {
+                "location": "Boston, MA",
+                "max_price": 1800,
+                "property_types": ["Apartment"],
+                "intent_kind": "general_rental",
+            }
+        )
+        messages = build_intent_update_messages(
+            previous,
+            "actually make it Philadelphia",
+            today="2026-04-28",
+        )
+
+        self.assertIn("full merged HousingSearchIntent", messages[0]["content"])
+        self.assertIn("Newer user messages override older values", messages[0]["content"])
+        self.assertNotIn("run_ohana_search", messages[0]["content"])
+        payload = json.loads(messages[1]["content"])
+        self.assertEqual(payload["previous_intent"]["location"], "Boston, MA")
+        self.assertEqual(payload["latest_user_message"], "actually make it Philadelphia")
+
+        fake = FakeJsonClient(
+            json.dumps(
+                {
+                    "location": "Philadelphia, PA",
+                    "max_price": 1800,
+                    "property_types": ["Apartment"],
+                    "intent_kind": "general_rental",
+                }
+            )
+        )
+        result = update_housing_intent(
+            previous,
+            "actually make it Philadelphia",
+            client=fake,
+            today="2026-04-28",
+        )
+
+        self.assertEqual(result.intent.location, "Philadelphia, PA")
+        self.assertEqual(result.intent.max_price, 1800)
 
     def test_mistral_client_posts_json_mode_chat_completion_payload(self) -> None:
         response_payload = {

@@ -9,12 +9,16 @@ from .provider_capabilities import (
 )
 from .intent_extractor import (
     INTENT_SYSTEM_PROMPT,
+    INTENT_UPDATE_SYSTEM_PROMPT,
     IntentExtractionResult,
     build_intent_messages,
+    build_intent_update_messages,
     extract_housing_intent,
     intent_from_mapping,
     parse_json_object,
+    update_housing_intent,
 )
+from .interactive_agent import AgentTurn, InteractiveHousingAgent
 from .llm_client import (
     DEFAULT_MISTRAL_MODEL,
     LLMClientError,
@@ -48,6 +52,9 @@ __all__ = [
     "FilterCapability",
     "HousingSearchIntent",
     "INTENT_SYSTEM_PROMPT",
+    "INTENT_UPDATE_SYSTEM_PROMPT",
+    "AgentTurn",
+    "InteractiveHousingAgent",
     "IntentExtractionResult",
     "LLMClientError",
     "MistralChatClient",
@@ -58,6 +65,7 @@ __all__ = [
     "SupportCategory",
     "DEFAULT_MISTRAL_MODEL",
     "build_intent_messages",
+    "build_intent_update_messages",
     "capability_matrix",
     "classify_filters",
     "coerce_intent",
@@ -70,4 +78,5 @@ __all__ = [
     "plan_query",
     "requested_filters",
     "score_provider_query",
+    "update_housing_intent",
 ]

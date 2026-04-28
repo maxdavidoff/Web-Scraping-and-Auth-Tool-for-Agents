@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -59,6 +59,37 @@ Field guidance:
 """.strip()
 
 
+INTENT_UPDATE_SYSTEM_PROMPT = """
+You update provider-neutral housing search intent for a rental-search planner.
+
+Return exactly one JSON object containing the full merged HousingSearchIntent.
+Preserve previous values unless the latest user message changes, corrects, or negates them.
+Newer user messages override older values.
+
+Use null for unknown scalar values, false for unknown booleans, and [] for unknown lists.
+Do not choose providers, build URLs, mention scraping, emit browser settings, or output commands.
+
+Allowed keys:
+location, min_price, max_price, bedrooms, bedroom_min, bedroom_max, bathrooms,
+bathroom_min, property_types, type_of_places, pet_policy, furnished,
+move_in_date, move_out_date, amenities, sort, map_bounds, photos,
+verified_listings, featured, page, section8, income_restricted,
+wheelchair_accessible, utilities_included, washer_dryer, keyword,
+intent_kind, notes.
+
+Field guidance:
+- location should be a city/neighborhood/campus area/ZIP as stated or reasonably inferred.
+- Dates should be ISO-like YYYY-MM-DD when a specific date is clear; otherwise preserve useful timing in notes.
+- property_types can include Apartment, House, Townhouse, Condo.
+- type_of_places can include Private room, Shared room, Entire place.
+- pet_policy should preserve explicit pet constraints like dogs, cats, pet friendly, no pets.
+- furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
+- section8, income_restricted, wheelchair_accessible, utilities_included, washer_dryer are true only when explicit.
+- intent_kind should be one of student_sublet, general_rental, affordable, apartment, unknown.
+- notes should preserve constraints that do not fit cleanly into fields.
+""".strip()
+
+
 def build_intent_messages(user_request: str, *, today: str | None = None) -> list[dict[str, str]]:
     request = user_request.strip()
     if not request:
@@ -73,6 +104,35 @@ def build_intent_messages(user_request: str, *, today: str | None = None) -> lis
                 {
                     "today": effective_today,
                     "housing_request": request,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def build_intent_update_messages(
+    previous_intent: HousingSearchIntent | Mapping[str, Any] | None,
+    latest_user_message: str,
+    *,
+    transcript: Sequence[Mapping[str, str]] | None = None,
+    today: str | None = None,
+) -> list[dict[str, str]]:
+    message = latest_user_message.strip()
+    if not message:
+        raise ValueError("Latest user message cannot be empty.")
+
+    effective_today = today or date.today().isoformat()
+    return [
+        {"role": "system", "content": INTENT_UPDATE_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "today": effective_today,
+                    "previous_intent": _intent_payload(previous_intent),
+                    "latest_user_message": message,
+                    "transcript": list(transcript or []),
                 },
                 ensure_ascii=False,
             ),
@@ -100,6 +160,48 @@ def extract_housing_intent(
         raw_response=raw,
         model=getattr(chat_client, "model", model or DEFAULT_MISTRAL_MODEL),
     )
+
+
+def update_housing_intent(
+    previous_intent: HousingSearchIntent | Mapping[str, Any] | None,
+    latest_user_message: str,
+    *,
+    client: JsonChatClient | None = None,
+    model: str | None = None,
+    transcript: Sequence[Mapping[str, str]] | None = None,
+    providers: Sequence[str] | None = None,
+    today: str | None = None,
+) -> IntentExtractionResult:
+    chat_client = client or MistralChatClient.from_env(model=model)
+    messages = build_intent_update_messages(
+        previous_intent,
+        latest_user_message,
+        transcript=transcript,
+        today=today,
+    )
+    response_text = chat_client.complete_json(messages, temperature=0.0, max_tokens=1200)
+    raw = parse_json_object(response_text)
+    intent = intent_from_mapping(raw)
+    query_plan = plan_query(intent, providers=providers)
+    return IntentExtractionResult(
+        intent=intent,
+        query_plan=query_plan,
+        raw_response=raw,
+        model=getattr(chat_client, "model", model or DEFAULT_MISTRAL_MODEL),
+    )
+
+
+def _intent_payload(value: HousingSearchIntent | Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, HousingSearchIntent):
+        payload = asdict(value)
+    else:
+        payload = dict(value)
+    return {
+        key: list(item) if isinstance(item, tuple) else item
+        for key, item in payload.items()
+    }
 
 
 def parse_json_object(text: str) -> dict[str, Any]:

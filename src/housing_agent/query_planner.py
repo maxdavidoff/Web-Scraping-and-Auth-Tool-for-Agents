@@ -275,6 +275,17 @@ def _profile_bonus(intent: HousingSearchIntent, provider: str) -> tuple[float, s
     text = _intent_text(intent)
     sublet_terms = ("sublet", "sublease", "student", "campus", "roommate", "private room", "shared room")
     affordable_terms = ("section 8", "section8", "voucher", "affordable", "income restricted", "income-restricted")
+    affordable_negated = any(
+        term in text
+        for term in (
+            "not affordable",
+            "not affordable housing",
+            "no voucher",
+            "without voucher",
+            "normal apartment",
+            "regular rental",
+        )
+    )
 
     if provider == OHANA and (
         intent.intent_kind == "student_sublet"
@@ -293,7 +304,7 @@ def _profile_bonus(intent: HousingSearchIntent, provider: str) -> tuple[float, s
         intent.section8
         or intent.income_restricted
         or intent.wheelchair_accessible
-        or any(term in text for term in affordable_terms)
+        or (not affordable_negated and any(term in text for term in affordable_terms))
     ):
         return 4.0, "affordable housing fit (+4)"
 

@@ -182,6 +182,14 @@ For the product-facing search flow, use `run_housing_search.py`. By default it o
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
 ```
 
+For a back-and-forth terminal experience, use the interactive chat agent:
+
+```bash
+python run_housing_chat.py --max-listings 5
+```
+
+The chat agent maintains intent across turns, asks for missing location or purpose when needed, plans by default, and only executes after `execute` followed by `yes`.
+
 Scraping is opt-in:
 
 ```bash
