@@ -67,6 +67,32 @@ class PostFilterTests(unittest.TestCase):
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.excluded_records, [])
 
+    def test_ohana_bedroom_mismatch_is_verification_not_exclusion(self) -> None:
+        intent = HousingSearchIntent(bedrooms=1)
+
+        result = apply_hard_constraints(
+            [
+                {
+                    "source": "ohana",
+                    "title": "Private room in larger apartment",
+                    "bedrooms": "4 beds",
+                    "raw_text": "Private room in a shared sublet apartment.",
+                },
+                {
+                    "source": "rentalsource",
+                    "title": "Too large for exact bedroom request",
+                    "bedrooms": "4 beds",
+                    "raw_text": "Four bedroom apartment.",
+                },
+            ],
+            intent,
+        )
+
+        self.assertEqual([record["title"] for record in result.records], ["Private room in larger apartment"])
+        self.assertIn("Bedroom count needs verification", result.records[0]["post_filter_notes"][0])
+        self.assertEqual([record["title"] for record in result.excluded_records], ["Too large for exact bedroom request"])
+        self.assertIn("bedrooms", result.exclusion_counts)
+
     def test_furnished_and_pet_negation_are_deterministic(self) -> None:
         intent = HousingSearchIntent(
             furnished=True,

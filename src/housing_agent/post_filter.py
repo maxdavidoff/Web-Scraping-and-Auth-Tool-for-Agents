@@ -123,7 +123,7 @@ def exclusion_reasons(
         if price_max is not None and price_max < intent.min_price:
             reasons.append(f"min_price: listing tops out at ${price_max:,}, below min ${intent.min_price:,}")
 
-    if "bedrooms" in names and intent.bedrooms is not None:
+    if "bedrooms" in names and intent.bedrooms is not None and not _skip_hard_bedroom_filter(record):
         if not _range_contains(
             _number(record.get("bedroom_min_count")),
             _number(record.get("bedroom_max_count")),
@@ -131,12 +131,12 @@ def exclusion_reasons(
         ):
             reasons.append(f"bedrooms: listing does not appear to include {intent.bedrooms} bedroom(s)")
 
-    if "bedroom_min" in names and intent.bedroom_min is not None:
+    if "bedroom_min" in names and intent.bedroom_min is not None and not _skip_hard_bedroom_filter(record):
         max_count = _number(record.get("bedroom_max_count"))
         if max_count is not None and max_count < intent.bedroom_min:
             reasons.append(f"bedroom_min: listing appears below {intent.bedroom_min} bedroom(s)")
 
-    if "bedroom_max" in names and intent.bedroom_max is not None:
+    if "bedroom_max" in names and intent.bedroom_max is not None and not _skip_hard_bedroom_filter(record):
         min_count = _number(record.get("bedroom_min_count"))
         if min_count is not None and min_count > intent.bedroom_max:
             reasons.append(f"bedroom_max: listing appears above {intent.bedroom_max} bedroom(s)")
@@ -241,6 +241,13 @@ def _annotate_post_filter_notes(record: dict[str, Any], intent: HousingSearchInt
         if keyword and keyword.lower() not in text:
             notes.append(f"Keyword needs verification: {keyword}.")
 
+    if _skip_hard_bedroom_filter(record):
+        bedroom_need = _bedroom_need_text(intent, names)
+        if bedroom_need:
+            notes.append(
+                f"Bedroom count needs verification for Ohana sublet listing: {bedroom_need}."
+            )
+
     if notes:
         unique_notes = list(dict.fromkeys(str(note).strip() for note in notes if str(note).strip()))
         record["post_filter_notes"] = unique_notes
@@ -293,6 +300,28 @@ def _normalize_filter_names(filter_names: Iterable[str] | None) -> tuple[str, ..
         if key not in normalized:
             normalized.append(key)
     return tuple(normalized)
+
+
+def _skip_hard_bedroom_filter(record: Mapping[str, Any]) -> bool:
+    provider = str(record.get("provider") or record.get("source") or "").strip().lower()
+    return provider == "ohana"
+
+
+def _bedroom_need_text(intent: HousingSearchIntent, names: set[str]) -> str:
+    if "bedrooms" in names and intent.bedrooms is not None:
+        return f"{intent.bedrooms} bedroom(s)"
+    if (
+        "bedroom_min" in names
+        and "bedroom_max" in names
+        and intent.bedroom_min is not None
+        and intent.bedroom_max is not None
+    ):
+        return f"{intent.bedroom_min}-{intent.bedroom_max} bedroom(s)"
+    if "bedroom_min" in names and intent.bedroom_min is not None:
+        return f"at least {intent.bedroom_min} bedroom(s)"
+    if "bedroom_max" in names and intent.bedroom_max is not None:
+        return f"at most {intent.bedroom_max} bedroom(s)"
+    return ""
 
 
 def _required_terms(intent: HousingSearchIntent, names: set[str]) -> tuple[str, ...]:
