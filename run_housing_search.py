@@ -18,7 +18,7 @@ def main() -> None:
         "--providers",
         nargs="+",
         default=None,
-        help="Optional provider subset, e.g. ohana rentalsource affordablehousing apartments_com.",
+        help="Optional provider subset, e.g. ohana rentalsource affordablehousing.",
     )
     parser.add_argument(
         "--execute",

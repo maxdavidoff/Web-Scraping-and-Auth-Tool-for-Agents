@@ -11,7 +11,7 @@ from src.ohana_agent.search_url import build_ohana_search_url
 from src.rentalsource_agent.search_url import build_rentalsource_search_url
 
 from .intent_extractor import JsonChatClient, extract_housing_intent
-from .provider_capabilities import AFFORDABLEHOUSING, APARTMENTS_COM, OHANA, RENTALSOURCE
+from .provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
 from .types import HousingSearchIntent, ProviderQueryPlan, QueryPlan
 
 
@@ -206,8 +206,6 @@ def build_search_url_preview(provider: str, intent: HousingSearchIntent) -> str 
                 utilities_included=intent.utilities_included,
                 washer_dryer=intent.washer_dryer,
             )
-        if provider == APARTMENTS_COM:
-            return None
     except ValueError:
         return None
     return None

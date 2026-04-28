@@ -1,6 +1,5 @@
 from .provider_capabilities import (
     AFFORDABLEHOUSING,
-    APARTMENTS_COM,
     OHANA,
     PROVIDER_CAPABILITIES,
     RENTALSOURCE,
@@ -42,7 +41,6 @@ from .types import (
 
 __all__ = [
     "AFFORDABLEHOUSING",
-    "APARTMENTS_COM",
     "OHANA",
     "PROVIDER_CAPABILITIES",
     "RENTALSOURCE",

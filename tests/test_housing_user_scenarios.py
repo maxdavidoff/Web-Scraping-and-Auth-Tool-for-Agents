@@ -83,10 +83,8 @@ class HousingUserScenarioTests(unittest.TestCase):
         self.assertIn("ohana", executed_providers)
         self.assertIn("rentalsource", executed_providers)
         self.assertIn("affordablehousing", executed_providers)
-        self.assertNotIn("apartments_com", executed_providers)
         self.assertEqual(response["execution"]["executed_providers"], list(executed_providers))
         self.assertEqual(response["records"][0]["provider"], "ohana")
-        self.assert_skipped_providers(response, ["apartments_com"])
 
     def test_execution_mode_surfaces_provider_failures_without_crashing(self) -> None:
         scenario = self._scenario("general_pet_friendly_apartment_philly")
@@ -106,23 +104,18 @@ class HousingUserScenarioTests(unittest.TestCase):
         self.assertEqual(statuses["rentalsource"], "failed")
         self.assertEqual(statuses["ohana"], "ok")
 
-    def test_execution_mode_does_not_call_router_when_only_unimplemented_provider_is_selected(self) -> None:
+    def test_unknown_provider_is_rejected_before_execution(self) -> None:
         scenario = self._scenario("amenity_heavy_apartment_new_york")
-        runner = Mock(side_effect=AssertionError("apartments_com must not be executed"))
 
-        response = build_housing_search_response(
-            scenario["user_message"],
-            client=FakeJsonClient(scenario["model_response"]),
-            providers=["apartments_com"],
-            execute=True,
-            runner=runner,
-            today="2026-04-28",
-        )
-
-        self.assertEqual(response["status"], "no_executable_providers")
-        runner.assert_not_called()
-        self.assertEqual(response["execution"]["executed_providers"], [])
-        self.assert_skipped_providers(response, ["apartments_com"])
+        with self.assertRaises(KeyError):
+            build_housing_search_response(
+                scenario["user_message"],
+                client=FakeJsonClient(scenario["model_response"]),
+                providers=["not_a_provider"],
+                execute=True,
+                runner=Mock(),
+                today="2026-04-28",
+            )
 
     def _scenario(self, name: str) -> dict:
         for scenario in self.scenarios:

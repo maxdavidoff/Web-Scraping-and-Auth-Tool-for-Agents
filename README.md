@@ -188,7 +188,7 @@ Scraping is opt-in:
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
 ```
 
-The execution path filters out providers that are not executable, including the staged Apartments.com capability profile.
+The execution path filters out any provider that is not wired to an executable scraper.
 
 Live Mistral tests are opt-in:
 

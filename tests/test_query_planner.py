@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.housing_agent.provider_capabilities import AFFORDABLEHOUSING, APARTMENTS_COM, OHANA, RENTALSOURCE
+from src.housing_agent.provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
 from src.housing_agent.query_planner import plan_query
 from src.housing_agent.types import HousingSearchIntent
 
@@ -99,7 +99,7 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertTrue(any("minimum price" in warning for warning in affordable.report.warnings))
         self.assertIn("section8", rentalsource.report.unsupported)
 
-    def test_amenity_heavy_apartment_intent_records_apartments_com_verified_and_unverified_layers(self) -> None:
+    def test_amenity_heavy_apartment_intent_uses_rentalsource_and_reports_unknown_filters(self) -> None:
         intent = HousingSearchIntent(
             location="New York, NY",
             min_price=2500,
@@ -118,24 +118,23 @@ class QueryPlannerTests(unittest.TestCase):
         )
 
         plan = plan_query(intent)
-        apartments = plan.for_provider(APARTMENTS_COM)
         rentalsource = plan.for_provider(RENTALSOURCE)
 
-        self.assertFalse(apartments.implemented)
-        self.assertLess(apartments.score, rentalsource.score)
+        self.assertEqual(plan.ranked_provider_names[0], RENTALSOURCE)
         for filter_name in [
             "location",
             "min_price",
             "max_price",
             "bedroom_min",
-            "bedroom_max",
             "bathroom_min",
-            "map_bounds",
+            "property_types",
+            "pet_policy",
+            "sort",
         ]:
-            self.assertIn(filter_name, apartments.report.applied_at_source)
-        for filter_name in ["amenities", "move_in_date", "property_types", "pet_policy", "sort", "keyword"]:
-            self.assertIn(filter_name, apartments.report.unknown_unverified)
-        self.assertTrue(any("not implemented" in warning for warning in apartments.report.warnings))
+            self.assertIn(filter_name, rentalsource.report.applied_at_source)
+        for filter_name in ["bedroom_max", "amenities", "move_in_date", "keyword"]:
+            self.assertIn(filter_name, rentalsource.report.unknown_unverified)
+        self.assertIn("map_bounds", rentalsource.report.unsupported)
 
 
 if __name__ == "__main__":

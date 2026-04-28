@@ -117,13 +117,7 @@
       "keyword": "near NYU",
       "intent_kind": "apartment"
     },
-    "expected_top_provider": "rentalsource",
-    "expected_provider_notes": {
-      "apartments_com": {
-        "implemented": false,
-        "unknown_unverified": ["amenities", "property_types", "pet_policy", "keyword"]
-      }
-    }
+    "expected_top_provider": "rentalsource"
   },
   {
     "name": "unfurnished_house_rental_boston",

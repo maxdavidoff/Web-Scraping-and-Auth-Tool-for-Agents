@@ -4,7 +4,6 @@ import unittest
 
 from src.housing_agent.provider_capabilities import (
     AFFORDABLEHOUSING,
-    APARTMENTS_COM,
     OHANA,
     RENTALSOURCE,
     capability_matrix,
@@ -19,7 +18,7 @@ class ProviderCapabilityMatrixTests(unittest.TestCase):
 
         self.assertEqual(
             set(matrix),
-            {OHANA, RENTALSOURCE, AFFORDABLEHOUSING, APARTMENTS_COM},
+            {OHANA, RENTALSOURCE, AFFORDABLEHOUSING},
         )
 
     def test_ohana_requires_login_and_has_verified_student_filters(self) -> None:
@@ -54,16 +53,6 @@ class ProviderCapabilityMatrixTests(unittest.TestCase):
         self.assertEqual(affordable.filters["min_price"].category, SupportCategory.POST_FILTER)
         self.assertTrue(affordable.filters["min_price"].post_filter_possible)
         self.assertIn("minimum price", affordable.filters["min_price"].warning)
-
-    def test_apartments_com_is_experimental_with_unverified_payload_fields(self) -> None:
-        apartments = get_provider_capabilities("apartments.com")
-
-        self.assertFalse(apartments.implemented)
-        self.assertTrue(apartments.experimental)
-        self.assertEqual(apartments.filters["map_bounds"].category, SupportCategory.QUERY_PARAM)
-        self.assertTrue(apartments.filters["map_bounds"].verified)
-        self.assertEqual(apartments.filters["amenities"].category, SupportCategory.NETWORK_PAYLOAD)
-        self.assertFalse(apartments.filters["amenities"].verified)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from .types import FilterCapability, ProviderCapabilities, SupportCategory
 OHANA = "ohana"
 RENTALSOURCE = "rentalsource"
 AFFORDABLEHOUSING = "affordablehousing"
-APARTMENTS_COM = "apartments_com"
 
 
 def _cap(
@@ -170,81 +169,6 @@ _AFFORDABLEHOUSING_FILTERS = {
 }
 
 
-_APARTMENTS_COM_FILTERS = {
-    "location": _cap("location", SupportCategory.PATH_SEGMENT, verified=True, source_field="location_slug"),
-    "min_price": _cap("min_price", SupportCategory.PATH_SEGMENT, verified=True, source_field="price_min"),
-    "max_price": _cap("max_price", SupportCategory.PATH_SEGMENT, verified=True, source_field="price_max"),
-    "bedrooms": _cap(
-        "bedrooms",
-        SupportCategory.PATH_SEGMENT,
-        verified=True,
-        source_field="beds",
-        notes="Exact bedroom intent can be represented by matching min/max bedroom URL filters.",
-    ),
-    "bedroom_min": _cap("bedroom_min", SupportCategory.PATH_SEGMENT, verified=True, source_field="bed_min"),
-    "bedroom_max": _cap("bedroom_max", SupportCategory.PATH_SEGMENT, verified=True, source_field="bed_max"),
-    "bathroom_min": _cap("bathroom_min", SupportCategory.PATH_SEGMENT, verified=True, source_field="bath_min"),
-    "bathrooms": _cap(
-        "bathrooms",
-        SupportCategory.PATH_SEGMENT,
-        verified=True,
-        source_field="bath_min",
-        notes="Apartments.com research verified bathroom minimum, not exact bathroom matching.",
-    ),
-    "map_bounds": _cap("map_bounds", SupportCategory.QUERY_PARAM, verified=True, source_field="bb"),
-    "amenities": _cap(
-        "amenities",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "move_in_date": _cap(
-        "move_in_date",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "property_types": _cap(
-        "property_types",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        source_field="home_type",
-        notes="Observed as home_type in network payload fields but not verified as stable.",
-    ),
-    "home_type": _cap(
-        "home_type",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "pet_policy": _cap(
-        "pet_policy",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "sort": _cap(
-        "sort",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "keyword": _cap(
-        "keyword",
-        SupportCategory.NETWORK_PAYLOAD,
-        verified=False,
-        notes="Observed in network payload fields but not verified as stable.",
-    ),
-    "furnished": _cap("furnished", SupportCategory.UNKNOWN, verified=False),
-    "move_out_date": _cap("move_out_date", SupportCategory.UNKNOWN, verified=False),
-    "section8": _cap("section8", SupportCategory.UNSUPPORTED, verified=True),
-    "income_restricted": _cap("income_restricted", SupportCategory.UNSUPPORTED, verified=True),
-    "wheelchair_accessible": _cap("wheelchair_accessible", SupportCategory.UNKNOWN, verified=False),
-    "utilities_included": _cap("utilities_included", SupportCategory.UNKNOWN, verified=False),
-    "washer_dryer": _cap("washer_dryer", SupportCategory.NETWORK_PAYLOAD, verified=False),
-}
-
-
 PROVIDER_CAPABILITIES = MappingProxyType(
     {
         OHANA: ProviderCapabilities(
@@ -278,19 +202,6 @@ PROVIDER_CAPABILITIES = MappingProxyType(
             filters=MappingProxyType(_AFFORDABLEHOUSING_FILTERS),
             notes=("Specialized affordable, voucher, and income-restricted housing source.",),
         ),
-        APARTMENTS_COM: ProviderCapabilities(
-            provider=APARTMENTS_COM,
-            implemented=False,
-            requires_login=False,
-            public=True,
-            experimental=True,
-            canonical_url_pattern="https://www.apartments.com/{location_slug}/{url_filter_segments}/?bb={bounds}",
-            filters=MappingProxyType(_APARTMENTS_COM_FILTERS),
-            notes=(
-                "Experimental research target; no scraper is implemented in this repository yet.",
-                "Some network-payload fields were observed but remain unverified.",
-            ),
-        ),
     }
 )
 
@@ -309,10 +220,6 @@ PROVIDER_ALIASES = MappingProxyType(
         "affordable housing": AFFORDABLEHOUSING,
         "affordablehousing": AFFORDABLEHOUSING,
         "affordablehousing.com": AFFORDABLEHOUSING,
-        "apartments": APARTMENTS_COM,
-        "apartments-com": APARTMENTS_COM,
-        "apartments_com": APARTMENTS_COM,
-        "apartments.com": APARTMENTS_COM,
     }
 )
 

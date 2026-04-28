@@ -27,7 +27,6 @@
     "expected_score_greater_than": [
       ["rentalsource", "affordablehousing"]
     ],
-    "must_not_execute": ["apartments_com"],
     "expected_filter_application": {
       "ohana": {
         "applied_at_source": ["location", "max_price", "bedrooms", "type_of_places", "furnished"],
@@ -36,8 +35,7 @@
     },
     "expected_user_visible_warnings": [
       "planning mode only",
-      "date filters are unverified or not source-applied",
-      "apartments_com will not be executed"
+      "date filters are unverified or not source-applied"
     ]
   },
   {
@@ -68,15 +66,13 @@
     "expected_score_greater_than": [
       ["rentalsource", "affordablehousing"]
     ],
-    "must_not_execute": ["apartments_com"],
     "expected_filter_application": {
       "rentalsource": {
         "applied_at_source": ["location", "max_price", "bedrooms", "property_types", "pet_policy", "photos", "sort"]
       }
     },
     "expected_user_visible_warnings": [
-      "planning mode only",
-      "apartments_com will not be executed"
+      "planning mode only"
     ]
   },
   {
@@ -98,15 +94,13 @@
       "intent_kind": "affordable"
     },
     "expected_top_provider": "affordablehousing",
-    "must_not_execute": ["apartments_com"],
     "expected_filter_application": {
       "affordablehousing": {
         "applied_at_source": ["location", "max_price", "section8", "income_restricted"]
       }
     },
     "expected_user_visible_warnings": [
-      "planning mode only",
-      "apartments_com will not be executed"
+      "planning mode only"
     ]
   },
   {
@@ -136,19 +130,14 @@
       "intent_kind": "apartment"
     },
     "expected_top_provider": "rentalsource",
-    "must_not_execute": ["apartments_com"],
     "expected_filter_application": {
       "rentalsource": {
         "applied_at_source": ["location", "max_price", "bedroom_min", "property_types", "pet_policy"],
         "unknown_unverified": ["amenities", "keyword"]
-      },
-      "apartments_com": {
-        "unknown_unverified": ["property_types", "pet_policy", "amenities", "keyword"]
       }
     },
     "expected_user_visible_warnings": [
-      "planning mode only",
-      "apartments_com will not be executed"
+      "planning mode only"
     ]
   }
 ]
