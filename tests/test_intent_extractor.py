@@ -75,8 +75,11 @@ class IntentExtractorTests(unittest.TestCase):
         intent = intent_from_mapping(
             {
                 "location": "Boston, MA",
+                "neighborhoods": ["Back Bay"],
+                "avoid_neighborhoods": ["Far commute"],
                 "min_price": "$1,000",
                 "max_price": "1800",
+                "price_basis": "per person",
                 "bedrooms": "1",
                 "bathrooms": "1.5",
                 "property_types": ["Apartment"],
@@ -85,16 +88,30 @@ class IntentExtractorTests(unittest.TestCase):
                 "furnished_status": ["Furnished"],
                 "movein": "2026-06-01",
                 "moveout": "2026-08-31",
+                "lease_length": "summer",
+                "campus_or_school": "Northeastern",
+                "commute_target": "campus",
+                "max_commute_minutes": "20",
+                "roommate_count": "2",
+                "required_amenities": ["laundry"],
+                "preferred_amenities": ["natural light"],
+                "dealbreakers": ["basement"],
+                "safety_priority": "high",
+                "student_priority": "medium",
                 "photos": "true",
                 "verified": "yes",
                 "section8": "false",
+                "flexibility_notes": ["dates can slide"],
                 "notes": ["near campus"],
             }
         )
 
         self.assertEqual(intent.location, "Boston, MA")
+        self.assertEqual(intent.neighborhoods, ("Back Bay",))
+        self.assertEqual(intent.avoid_neighborhoods, ("Far commute",))
         self.assertEqual(intent.min_price, 1000)
         self.assertEqual(intent.max_price, 1800)
+        self.assertEqual(intent.price_basis, "per_person")
         self.assertEqual(intent.bedrooms, 1)
         self.assertEqual(intent.bathrooms, 1.5)
         self.assertEqual(intent.property_types, ("Apartment",))
@@ -102,9 +119,20 @@ class IntentExtractorTests(unittest.TestCase):
         self.assertTrue(intent.furnished)
         self.assertEqual(intent.move_in_date, "2026-06-01")
         self.assertEqual(intent.move_out_date, "2026-08-31")
+        self.assertEqual(intent.lease_length, "summer")
+        self.assertEqual(intent.campus_or_school, "Northeastern")
+        self.assertEqual(intent.commute_target, "campus")
+        self.assertEqual(intent.max_commute_minutes, 20)
+        self.assertEqual(intent.roommate_count, 2)
+        self.assertEqual(intent.required_amenities, ("laundry",))
+        self.assertEqual(intent.preferred_amenities, ("natural light",))
+        self.assertEqual(intent.dealbreakers, ("basement",))
+        self.assertEqual(intent.safety_priority, "high")
+        self.assertEqual(intent.student_priority, "medium")
         self.assertTrue(intent.photos)
         self.assertTrue(intent.verified_listings)
         self.assertFalse(intent.section8)
+        self.assertEqual(intent.flexibility_notes, ("dates can slide",))
         self.assertEqual(intent.notes, ("near campus",))
 
     def test_extract_housing_intent_uses_mocked_mistral_client_and_plans_providers(self) -> None:

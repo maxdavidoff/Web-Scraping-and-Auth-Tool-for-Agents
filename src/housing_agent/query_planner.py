@@ -189,7 +189,8 @@ def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
         filters["furnished"] = intent.furnished
     _add_if_value(filters, "move_in_date", intent.move_in_date)
     _add_if_value(filters, "move_out_date", intent.move_out_date)
-    _add_if_value(filters, "amenities", intent.amenities)
+    amenities = _unique_strings((*intent.amenities, *intent.required_amenities, *intent.preferred_amenities))
+    _add_if_value(filters, "amenities", amenities)
     _add_if_value(filters, "sort", intent.sort)
     _add_if_value(filters, "map_bounds", intent.map_bounds)
     if intent.photos:
@@ -244,7 +245,19 @@ def coerce_intent(value: HousingSearchIntent | Mapping[str, Any] | Any) -> Housi
     allowed = set(HousingSearchIntent.__dataclass_fields__)
     normalized = {name: data[name] for name in allowed if name in data}
 
-    for tuple_field in ("property_types", "type_of_places", "pet_policy", "amenities", "notes"):
+    for tuple_field in (
+        "neighborhoods",
+        "avoid_neighborhoods",
+        "property_types",
+        "type_of_places",
+        "pet_policy",
+        "amenities",
+        "required_amenities",
+        "preferred_amenities",
+        "dealbreakers",
+        "flexibility_notes",
+        "notes",
+    ):
         if tuple_field in normalized:
             normalized[tuple_field] = _as_tuple(normalized[tuple_field])
 
@@ -269,6 +282,18 @@ def _as_tuple(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     return tuple(str(item) for item in value if str(item).strip())
+
+
+def _unique_strings(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            unique.append(text)
+    return tuple(unique)
 
 
 def _profile_bonus(intent: HousingSearchIntent, provider: str) -> tuple[float, str]:
@@ -316,7 +341,17 @@ def _intent_text(intent: HousingSearchIntent) -> str:
     if intent.intent_kind:
         pieces.append(intent.intent_kind)
     pieces.extend(intent.notes)
+    pieces.extend(intent.flexibility_notes)
+    pieces.extend(intent.neighborhoods)
+    pieces.extend(intent.avoid_neighborhoods)
     pieces.extend(intent.property_types)
     pieces.extend(intent.type_of_places)
     pieces.extend(intent.amenities)
+    pieces.extend(intent.required_amenities)
+    pieces.extend(intent.preferred_amenities)
+    pieces.extend(intent.dealbreakers)
+    if intent.campus_or_school:
+        pieces.append(intent.campus_or_school)
+    if intent.commute_target:
+        pieces.append(intent.commute_target)
     return " ".join(pieces).lower()

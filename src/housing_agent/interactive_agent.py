@@ -8,17 +8,21 @@ from typing import Any, Callable, Mapping, Sequence
 from src.ohana_agent.provider_router import run_provider_searches
 
 from .intent_extractor import JsonChatClient, update_housing_intent
+from .listing_ranker import rank_listings
 from .provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
+from .readiness_evaluator import evaluate_search_readiness
 from .search_app import (
     executable_provider_plan,
     legacy_router_plan_from_intent,
     query_plan_to_dict,
     user_visible_warnings,
 )
-from .types import HousingSearchIntent, QueryPlan
+from .types import HousingSearchIntent, ListingRankingResult, QueryPlan, SearchReadiness
 
 
 AgentRunner = Callable[..., Any]
+ReadinessEvaluator = Callable[..., SearchReadiness]
+ListingRanker = Callable[..., ListingRankingResult]
 
 HELP_TEXT = """
 Tell me what you are looking for in normal language. I will ask one clarification if I need it, then suggest the best source to search first.
@@ -42,8 +46,10 @@ class AgentTurn:
     state: str
     message: str
     intent: HousingSearchIntent | None = None
+    search_readiness: SearchReadiness | None = None
     query_plan: QueryPlan | None = None
     execution_result: Any | None = None
+    listing_ranking: ListingRankingResult | None = None
     json_payload: Mapping[str, Any] | None = None
 
 
@@ -55,6 +61,8 @@ class InteractiveHousingAgent:
         model: str | None = None,
         providers: Sequence[str] | None = None,
         runner: AgentRunner = run_provider_searches,
+        readiness_evaluator: ReadinessEvaluator = evaluate_search_readiness,
+        listing_ranker: ListingRanker = rank_listings,
         today: str | None = None,
         max_listings: int = 10,
         scrolls: int = 3,
@@ -68,6 +76,8 @@ class InteractiveHousingAgent:
         self.model = model
         self.providers = tuple(providers) if providers else None
         self.runner = runner
+        self.readiness_evaluator = readiness_evaluator
+        self.listing_ranker = listing_ranker
         self.today = today
         self.max_listings = max_listings
         self.scrolls = scrolls
@@ -79,9 +89,12 @@ class InteractiveHousingAgent:
 
         self.transcript: list[dict[str, str]] = []
         self.current_intent: HousingSearchIntent | None = None
+        self.latest_readiness: SearchReadiness | None = None
         self.latest_plan: QueryPlan | None = None
         self.latest_planning_payload: dict[str, Any] | None = None
         self.latest_execution_result: Any | None = None
+        self.latest_listing_ranking: ListingRankingResult | None = None
+        self.latest_ranking_error: str = ""
         self.pending_execution_confirmation = False
         self.proposed_execution_providers: tuple[str, ...] = ()
 
@@ -92,6 +105,7 @@ class InteractiveHousingAgent:
                 state="collecting",
                 message="Tell me what kind of housing you are looking for.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
             )
 
@@ -102,6 +116,8 @@ class InteractiveHousingAgent:
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
         self.latest_execution_result = None
+        self.latest_listing_ranking = None
+        self.latest_ranking_error = ""
         previous_transcript = list(self.transcript)
         self.transcript.append({"role": "user", "content": message})
 
@@ -120,19 +136,38 @@ class InteractiveHousingAgent:
                 state="error",
                 message=f"I could not update the housing intent: {exc}",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
             )
 
         self.current_intent = extraction.intent
         self.latest_plan = extraction.query_plan
+
+        try:
+            self.latest_readiness = self.readiness_evaluator(
+                self.current_intent,
+                client=self.client,
+                model=self.model,
+                transcript=self.transcript,
+                today=self.today,
+            )
+        except Exception as exc:
+            return AgentTurn(
+                state="error",
+                message=f"I could not evaluate search readiness: {exc}",
+                intent=self.current_intent,
+                query_plan=self.latest_plan,
+            )
+
         self.latest_planning_payload = self._planning_payload()
 
-        clarification = self._clarification_question(self.current_intent)
+        clarification = self._readiness_followup()
         if clarification:
             return AgentTurn(
                 state="needs_clarification",
                 message=clarification,
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -142,9 +177,12 @@ class InteractiveHousingAgent:
     def reset(self) -> AgentTurn:
         self.transcript = []
         self.current_intent = None
+        self.latest_readiness = None
         self.latest_plan = None
         self.latest_planning_payload = None
         self.latest_execution_result = None
+        self.latest_listing_ranking = None
+        self.latest_ranking_error = ""
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
         return AgentTurn(
@@ -157,11 +195,14 @@ class InteractiveHousingAgent:
         return {
             "state": self._current_state(),
             "intent": _to_jsonable(self.current_intent),
+            "search_readiness": _to_jsonable(self.latest_readiness),
             "query_plan": query_plan_to_dict(self.latest_plan) if self.latest_plan else None,
             "pending_execution_confirmation": self.pending_execution_confirmation,
             "proposed_execution_providers": list(self.proposed_execution_providers),
             "max_listings": self.max_listings,
             "execution_result": self._execution_payload(self.latest_execution_result),
+            "listing_ranking": _to_jsonable(self.latest_listing_ranking),
+            "ranking_error": self.latest_ranking_error,
             "transcript": list(self.transcript),
         }
 
@@ -175,6 +216,9 @@ class InteractiveHousingAgent:
             "Intent:",
         ]
         lines.extend(f"- {line}" for line in _intent_summary_lines(self.current_intent))
+        if self.latest_readiness:
+            lines.extend(["", "Readiness:"])
+            lines.extend(f"- {line}" for line in _readiness_summary_lines(self.latest_readiness))
         lines.extend(["", "Provider ranking:"])
 
         for index, provider_plan in enumerate(self.latest_plan.provider_plans, start=1):
@@ -245,6 +289,8 @@ class InteractiveHousingAgent:
             "Search execution finished.",
             f"- Listings returned: {len(records)}",
         ]
+        if self.latest_readiness and not self.latest_readiness.ready_to_recommend:
+            lines.append("- Recommendation confidence: limited; some important details were missing or assumptions were made.")
         if provider_results:
             lines.append("")
             lines.append("Provider statuses:")
@@ -256,7 +302,26 @@ class InteractiveHousingAgent:
                 suffix = f" — {error}" if error else ""
                 lines.append(f"- {provider}: {status}, {count} listing(s){suffix}")
 
-        if records:
+        if self.latest_listing_ranking:
+            ranking = self.latest_listing_ranking
+            if ranking.overall_summary:
+                lines.extend(["", ranking.overall_summary])
+            if ranking.recommended:
+                lines.extend(["", "Recommended:"])
+                for listing in ranking.recommended[:5]:
+                    lines.append(f"- {_ranked_listing_line(listing)}")
+            if ranking.needs_verification:
+                lines.extend(["", "Needs verification:"])
+                for listing in ranking.needs_verification[:5]:
+                    lines.append(f"- {_ranked_listing_line(listing)}")
+            if ranking.excluded:
+                lines.extend(["", "Excluded:"])
+                for listing in ranking.excluded[:5]:
+                    lines.append(f"- {_ranked_listing_line(listing)}")
+            if ranking.followup_suggestions:
+                lines.extend(["", "Useful next checks:"])
+                lines.extend(f"- {suggestion}" for suggestion in ranking.followup_suggestions[:3])
+        elif records:
             lines.append("")
             lines.append("Top listings:")
             for record in records[:5]:
@@ -266,6 +331,8 @@ class InteractiveHousingAgent:
                 provider = record.get("provider") or record.get("source") or ""
                 pieces = [piece for piece in [title, price, location, provider] if piece]
                 lines.append(f"- {' | '.join(str(piece) for piece in pieces)}")
+        if self.latest_ranking_error:
+            lines.extend(["", f"Ranking note: listing fit ranking failed, so these are unranked results ({self.latest_ranking_error})."])
 
         artifacts = _artifact_lines(provider_results)
         if artifacts:
@@ -293,6 +360,7 @@ class InteractiveHousingAgent:
                 state=self._current_state(),
                 message=self.render_plan() if self.latest_plan else "No plan is available yet.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -310,8 +378,10 @@ class InteractiveHousingAgent:
                 state=self._current_state(),
                 message=json.dumps(payload, indent=2, ensure_ascii=False),
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 execution_result=self.latest_execution_result,
+                listing_ranking=self.latest_listing_ranking,
                 json_payload=payload,
             )
         if lower == "transcript":
@@ -319,6 +389,7 @@ class InteractiveHousingAgent:
                 state=self._current_state(),
                 message=_render_transcript(self.transcript),
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -329,6 +400,7 @@ class InteractiveHousingAgent:
                     state="blocked",
                     message="Max listings must be a positive integer.",
                     intent=self.current_intent,
+                    search_readiness=self.latest_readiness,
                     query_plan=self.latest_plan,
                     json_payload=self.current_state_payload(),
                 )
@@ -339,6 +411,7 @@ class InteractiveHousingAgent:
                 state=self._current_state(),
                 message=f"Max listings per provider set to {self.max_listings}.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -351,12 +424,13 @@ class InteractiveHousingAgent:
                 message="No search intent is available yet. Tell me what you are looking for first.",
                 json_payload=self.current_state_payload(),
             )
-        clarification = self._clarification_question(self.current_intent)
+        clarification = self._readiness_followup()
         if clarification:
             return AgentTurn(
                 state="needs_clarification",
                 message=clarification,
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -365,6 +439,7 @@ class InteractiveHousingAgent:
                 state="blocked",
                 message="No provider plan is available yet. Tell me what you are looking for first.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 json_payload=self.current_state_payload(),
             )
         return self._agent_led_planning_turn()
@@ -376,12 +451,13 @@ class InteractiveHousingAgent:
                 message="Execution is blocked until there is a provider plan. Tell me what you are looking for first.",
                 json_payload=self.current_state_payload(),
             )
-        clarification = self._clarification_question(self.current_intent)
+        clarification = self._readiness_followup()
         if clarification:
             return AgentTurn(
                 state="needs_clarification",
                 message=clarification,
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -391,6 +467,7 @@ class InteractiveHousingAgent:
                 state="blocked",
                 message="Execution is blocked because no executable provider is available for this plan.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -400,6 +477,7 @@ class InteractiveHousingAgent:
             state="execution_confirmation_requested",
             message=self.render_execution_confirmation(),
             intent=self.current_intent,
+            search_readiness=self.latest_readiness,
             query_plan=self.latest_plan,
             json_payload=self.current_state_payload(),
         )
@@ -410,6 +488,7 @@ class InteractiveHousingAgent:
                 state="blocked",
                 message="There is no search awaiting confirmation yet. Tell me what you are looking for, or type `plan` if you want to review the current search.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -429,6 +508,7 @@ class InteractiveHousingAgent:
                 state="blocked",
                 message="Execution is blocked because no executable provider is available for this plan.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -456,6 +536,7 @@ class InteractiveHousingAgent:
                 state="error",
                 message=f"Search execution failed before provider results were returned: {exc}",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -463,12 +544,30 @@ class InteractiveHousingAgent:
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
         self.latest_execution_result = result
+
+        records = list(getattr(result, "records", []) or [])
+        self.latest_listing_ranking = None
+        self.latest_ranking_error = ""
+        if records:
+            try:
+                self.latest_listing_ranking = self.listing_ranker(
+                    self.current_intent,
+                    self.latest_readiness,
+                    records,
+                    client=self.client,
+                    model=self.model,
+                )
+            except Exception as exc:
+                self.latest_ranking_error = str(exc)
+
         return AgentTurn(
             state="executed",
             message=self.render_execution_result(result),
             intent=self.current_intent,
+            search_readiness=self.latest_readiness,
             query_plan=self.latest_plan,
             execution_result=result,
+            listing_ranking=self.latest_listing_ranking,
             json_payload=self.current_state_payload(),
         )
 
@@ -478,6 +577,7 @@ class InteractiveHousingAgent:
                 state="blocked",
                 message="Nothing is awaiting confirmation.",
                 intent=self.current_intent,
+                search_readiness=self.latest_readiness,
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
@@ -487,16 +587,35 @@ class InteractiveHousingAgent:
             state="planned",
             message="Execution canceled. No search has run.",
             intent=self.current_intent,
+            search_readiness=self.latest_readiness,
             query_plan=self.latest_plan,
             json_payload=self.current_state_payload(),
         )
 
-    def _clarification_question(self, intent: HousingSearchIntent) -> str | None:
-        if not intent.location:
-            return "What city, neighborhood, campus area, or ZIP code should I search in?"
-        if not _has_purpose_signal(intent):
-            return "Is this a student/sublet room search, a regular rental search, or affordable/voucher housing?"
-        return None
+    def _readiness_followup(self) -> str | None:
+        if not self.current_intent:
+            return None
+        if not self.latest_readiness:
+            if not self.current_intent.location:
+                return "What city, neighborhood, campus area, or ZIP code should I search in?"
+            return None
+        if self.latest_readiness.ready_to_search and self.latest_readiness.next_action != "ask_followup":
+            return None
+        questions = self.latest_readiness.followup_questions
+        if not questions and not self.latest_readiness.ready_to_search:
+            questions = ("What budget, room type or bedroom count, and move-in timing should I use to narrow this?",)
+        if not questions:
+            return None
+        lines: list[str] = []
+        if self.latest_readiness.reasoning_summary:
+            lines.append(self.latest_readiness.reasoning_summary)
+            lines.append("")
+        if len(questions) == 1:
+            lines.append(questions[0])
+        else:
+            lines.append("Two details would make this search much more useful:")
+            lines.extend(f"- {question}" for question in questions[:2])
+        return "\n".join(lines)
 
     def _agent_led_planning_turn(self) -> AgentTurn:
         proposed_providers = self._recommended_execution_providers()
@@ -512,6 +631,7 @@ class InteractiveHousingAgent:
             state=state,
             message=self.render_agent_led_plan(),
             intent=self.current_intent,
+            search_readiness=self.latest_readiness,
             query_plan=self.latest_plan,
             json_payload=self.current_state_payload(),
         )
@@ -527,6 +647,10 @@ class InteractiveHousingAgent:
             "",
             f"I’d start with {_provider_label(top_plan.provider)} because {_user_facing_reason(top_plan.provider)}",
         ]
+        if self.latest_readiness and self.latest_readiness.reasoning_summary:
+            lines.extend(["", self.latest_readiness.reasoning_summary])
+        if self.latest_readiness and not self.latest_readiness.ready_to_recommend:
+            lines.append("I can search, but I’ll treat the matches as options to verify rather than confident recommendations.")
 
         warnings = _user_facing_warnings(self.latest_plan)
         if warnings:
@@ -562,6 +686,7 @@ class InteractiveHousingAgent:
         executable_providers, skipped = executable_provider_plan(self.latest_plan)
         return {
             "intent": _to_jsonable(self.current_intent),
+            "search_readiness": _to_jsonable(self.latest_readiness),
             "query_plan": query_plan_to_dict(self.latest_plan),
             "execution": {
                 "requested": False,
@@ -603,7 +728,7 @@ class InteractiveHousingAgent:
         if self.latest_execution_result is not None:
             return "executed"
         if self.latest_plan is not None:
-            clarification = self._clarification_question(self.current_intent) if self.current_intent else None
+            clarification = self._readiness_followup() if self.current_intent else None
             return "needs_clarification" if clarification else "planned"
         if self.current_intent is not None:
             return "collecting"
@@ -650,8 +775,11 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
     data = _to_jsonable(intent)
     labels = {
         "location": "Location",
+        "neighborhoods": "Neighborhoods",
+        "avoid_neighborhoods": "Avoid neighborhoods",
         "min_price": "Min price",
         "max_price": "Max price",
+        "price_basis": "Price basis",
         "bedrooms": "Bedrooms",
         "bedroom_min": "Bedroom min",
         "bedroom_max": "Bedroom max",
@@ -663,7 +791,17 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
         "furnished": "Furnished",
         "move_in_date": "Move in",
         "move_out_date": "Move out",
+        "lease_length": "Lease length",
+        "campus_or_school": "Campus/school",
+        "commute_target": "Commute target",
+        "max_commute_minutes": "Max commute minutes",
+        "roommate_count": "Roommate count",
         "amenities": "Amenities",
+        "required_amenities": "Required amenities",
+        "preferred_amenities": "Preferred amenities",
+        "dealbreakers": "Dealbreakers",
+        "safety_priority": "Safety priority",
+        "student_priority": "Student priority",
         "sort": "Sort",
         "section8": "Section 8",
         "income_restricted": "Income restricted",
@@ -672,6 +810,7 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
         "washer_dryer": "Washer/dryer",
         "keyword": "Keyword",
         "intent_kind": "Intent kind",
+        "flexibility_notes": "Flexibility",
         "notes": "Notes",
     }
     lines: list[str] = []
@@ -679,12 +818,52 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
         value = data.get(key)
         if value is None or value == "" or value == [] or value is False:
             continue
+        if key in {"price_basis", "safety_priority", "student_priority"} and value == "unknown":
+            continue
         if isinstance(value, list):
             rendered = ", ".join(str(item) for item in value)
         else:
             rendered = str(value)
         lines.append(f"{label}: {rendered}")
     return lines or ["No concrete filters yet"]
+
+
+def _readiness_summary_lines(readiness: SearchReadiness) -> list[str]:
+    lines = [
+        f"Ready to search: {readiness.ready_to_search}",
+        f"Ready to recommend: {readiness.ready_to_recommend}",
+        f"Confidence: {readiness.confidence}",
+    ]
+    if readiness.missing_required_fields:
+        lines.append("Missing: " + ", ".join(readiness.missing_required_fields))
+    if readiness.hard_constraints:
+        lines.append("Hard constraints: " + ", ".join(readiness.hard_constraints))
+    if readiness.soft_preferences:
+        lines.append("Soft preferences: " + ", ".join(readiness.soft_preferences))
+    if readiness.safe_assumptions:
+        lines.append("Safe assumptions: " + ", ".join(readiness.safe_assumptions))
+    if readiness.reasoning_summary:
+        lines.append("Summary: " + readiness.reasoning_summary)
+    return lines
+
+
+def _ranked_listing_line(listing: Any) -> str:
+    title = getattr(listing, "title", "") or "Untitled listing"
+    url = getattr(listing, "url", "")
+    score = getattr(listing, "fit_score", 0)
+    why = getattr(listing, "why_it_fits", "")
+    concerns = tuple(getattr(listing, "concerns", ()) or ())
+    missing = tuple(getattr(listing, "missing_info", ()) or ())
+    suffixes: list[str] = [f"fit {score:g}/100"]
+    if why:
+        suffixes.append(why)
+    if missing:
+        suffixes.append("missing: " + ", ".join(missing[:3]))
+    if concerns:
+        suffixes.append("concerns: " + ", ".join(concerns[:3]))
+    if url:
+        suffixes.append(url)
+    return f"{title} ({'; '.join(suffixes)})"
 
 
 def _why_line(reasons: Sequence[str]) -> str:
@@ -723,10 +902,15 @@ def _proposal_sentence(providers: Sequence[str], max_listings: int) -> str:
 
 def _one_line_intent(intent: HousingSearchIntent) -> str:
     pieces: list[str] = []
-    if intent.property_types:
-        pieces.append(", ".join(intent.property_types).lower())
+    if intent.intent_kind == "student_sublet":
+        if intent.campus_or_school:
+            pieces.append(f"student summer housing near {intent.campus_or_school}")
+        else:
+            pieces.append("student/sublet housing")
     elif intent.type_of_places:
         pieces.append(", ".join(intent.type_of_places).lower())
+    elif intent.property_types:
+        pieces.append(", ".join(intent.property_types).lower())
     elif intent.intent_kind and intent.intent_kind != "unknown":
         pieces.append(intent.intent_kind.replace("_", " "))
     else:

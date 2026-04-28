@@ -1,3 +1,4 @@
+# Runtime dependencies only. The housing LLM layers use the stdlib HTTP client.
 playwright==1.52.0
 python-dotenv==1.0.1
 certifi>=2024.0.0

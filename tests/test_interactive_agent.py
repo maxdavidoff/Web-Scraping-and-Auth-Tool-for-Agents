@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from src.housing_agent.interactive_agent import InteractiveHousingAgent
+from src.housing_agent.types import ListingRankingResult, RankedListing, SearchReadiness
 
 
 class FakeJsonClient:
@@ -48,6 +49,62 @@ def fake_router_result(records: list[dict] | None = None, errors: dict[str, str]
     return SimpleNamespace(provider_results=provider_results, records=records, errors=errors)
 
 
+def ready_readiness(intent, **kwargs):
+    return SearchReadiness(
+        ready_to_search=True,
+        ready_to_recommend=True,
+        confidence="high",
+        next_action="request_confirmation",
+        hard_constraints=tuple(filter(None, [intent.location])),
+        reasoning_summary="I have enough information to run a targeted search.",
+    )
+
+
+def not_ready_readiness(*questions: str):
+    def evaluator(intent, **kwargs):
+        return SearchReadiness(
+            ready_to_search=False,
+            ready_to_recommend=False,
+            confidence="medium",
+            next_action="ask_followup",
+            missing_required_fields=tuple(question.rstrip("?") for question in questions),
+            followup_questions=tuple(questions),
+            reasoning_summary="A couple of details would materially improve the search.",
+        )
+
+    return evaluator
+
+
+def readiness_sequence(*items):
+    queue = list(items)
+
+    def evaluator(intent, **kwargs):
+        if not queue:
+            raise AssertionError("Readiness response queue is empty")
+        item = queue.pop(0)
+        return item(intent, **kwargs) if callable(item) else item
+
+    return evaluator
+
+
+def fake_listing_ranker(intent, readiness, records, **kwargs):
+    first = records[0]
+    return ListingRankingResult(
+        recommended=(
+            RankedListing(
+                listing_id=str(first.get("listing_id", "")),
+                title=first.get("title", "Test listing"),
+                url=first.get("url", ""),
+                fit_score=88,
+                matched_constraints=("location",),
+                why_it_fits="Matches the mocked search intent.",
+                provider=first.get("provider", first.get("source", "")),
+            ),
+        ),
+        overall_summary="Ranked against the current housing intent.",
+    )
+
+
 class InteractiveHousingAgentTests(unittest.TestCase):
     def test_missing_location_triggers_clarification(self) -> None:
         agent = InteractiveHousingAgent(
@@ -59,7 +116,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "intent_kind": "general_rental",
                     }
                 ]
-            )
+            ),
+            readiness_evaluator=not_ready_readiness("What city, neighborhood, campus area, or ZIP code should I search in?"),
         )
 
         turn = agent.handle_user_message("I need a one bedroom under 1800")
@@ -78,7 +136,10 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "notes": ["cheap place"],
                     }
                 ]
-            )
+            ),
+            readiness_evaluator=not_ready_readiness(
+                "Is this a student/sublet room search, a regular rental search, or affordable/voucher housing?"
+            ),
         )
 
         turn = agent.handle_user_message("I need a cheap place in Boston")
@@ -93,6 +154,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
             (
                 {
                     "location": "Boston, MA",
+                    "max_price": 1600,
                     "section8": True,
                     "intent_kind": "affordable",
                     "notes": ["voucher holder"],
@@ -102,8 +164,10 @@ class InteractiveHousingAgentTests(unittest.TestCase):
             (
                 {
                     "location": "Boston, MA",
+                    "max_price": 1800,
                     "type_of_places": ["Private room"],
                     "furnished": True,
+                    "move_in_date": "2026-06-01",
                     "intent_kind": "student_sublet",
                 },
                 "ohana",
@@ -111,7 +175,10 @@ class InteractiveHousingAgentTests(unittest.TestCase):
             (
                 {
                     "location": "Boston, MA",
+                    "max_price": 2200,
+                    "bedrooms": 1,
                     "property_types": ["Apartment"],
+                    "move_in_date": "2026-06-01",
                     "intent_kind": "general_rental",
                     "notes": ["normal apartment"],
                 },
@@ -121,7 +188,10 @@ class InteractiveHousingAgentTests(unittest.TestCase):
 
         for response, expected_provider in scenarios:
             with self.subTest(provider=expected_provider):
-                agent = InteractiveHousingAgent(client=FakeJsonClient([response]))
+                agent = InteractiveHousingAgent(
+                    client=FakeJsonClient([response]),
+                    readiness_evaluator=ready_readiness,
+                )
                 turn = agent.handle_user_message("housing request")
 
                 self.assertEqual(turn.state, "execution_confirmation_requested")
@@ -145,7 +215,13 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 },
             ]
         )
-        agent = InteractiveHousingAgent(client=client)
+        agent = InteractiveHousingAgent(
+            client=client,
+            readiness_evaluator=readiness_sequence(
+                not_ready_readiness("What city, neighborhood, campus area, or ZIP code should I search in?"),
+                ready_readiness,
+            ),
+        )
 
         first = agent.handle_user_message("I need a furnished private room")
         second = agent.handle_user_message("Boston under 1800")
@@ -175,7 +251,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "intent_kind": "general_rental",
                     },
                 ]
-            )
+            ),
+            readiness_evaluator=ready_readiness,
         )
 
         agent.handle_user_message("I need an apartment in Boston under 1800")
@@ -202,7 +279,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "notes": ["user no longer needs pet-friendly housing"],
                     },
                 ]
-            )
+            ),
+            readiness_evaluator=ready_readiness,
         )
 
         agent.handle_user_message("I need a dog friendly apartment in Boston")
@@ -222,7 +300,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "notes": ["normal apartment, not affordable housing"],
                     }
                 ]
-            )
+            ),
+            readiness_evaluator=ready_readiness,
         )
 
         turn = agent.handle_user_message("I need a normal apartment, not affordable housing, in Boston")
@@ -233,6 +312,30 @@ class InteractiveHousingAgentTests(unittest.TestCase):
             turn.query_plan.for_provider("rentalsource").score,
             turn.query_plan.for_provider("affordablehousing").score,
         )
+
+    def test_student_program_summary_does_not_echo_broad_property_types_first(self) -> None:
+        agent = InteractiveHousingAgent(
+            client=FakeJsonClient(
+                [
+                    {
+                        "location": "University of Pennsylvania, Philadelphia, PA",
+                        "campus_or_school": "UPenn",
+                        "max_price": 5000,
+                        "property_types": ["Apartment", "House", "Townhouse", "Condo"],
+                        "lease_length": "summer",
+                        "intent_kind": "student_sublet",
+                        "notes": ["summer program"],
+                    }
+                ]
+            ),
+            readiness_evaluator=ready_readiness,
+        )
+
+        turn = agent.handle_user_message("probably like 5k")
+
+        self.assertEqual(turn.state, "execution_confirmation_requested")
+        self.assertIn("student summer housing near UPenn", turn.message)
+        self.assertNotIn("apartment, house, townhouse, condo", turn.message.lower())
 
     def test_execute_before_planning_is_blocked(self) -> None:
         runner = Mock()
@@ -257,6 +360,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 ]
             ),
             runner=runner,
+            readiness_evaluator=ready_readiness,
+            listing_ranker=fake_listing_ranker,
             max_listings=5,
         )
 
@@ -266,6 +371,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         self.assertEqual(confirmation.state, "execution_confirmation_requested")
         self.assertIn("return up to 5 listings", confirmation.message)
         self.assertEqual(execution.state, "executed")
+        self.assertIn("Recommended:", execution.message)
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_listings"], 5)
         self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource",))
@@ -283,6 +389,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 ]
             ),
             runner=runner,
+            readiness_evaluator=ready_readiness,
+            listing_ranker=fake_listing_ranker,
             max_listings=5,
         )
 
@@ -320,6 +428,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 ]
             ),
             runner=runner,
+            readiness_evaluator=ready_readiness,
         )
 
         agent.handle_user_message("I need an apartment in Boston")
@@ -342,6 +451,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 ]
             ),
             runner=runner,
+            readiness_evaluator=ready_readiness,
+            listing_ranker=fake_listing_ranker,
         )
 
         agent.handle_user_message("I need an apartment in Boston")
@@ -375,7 +486,8 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                         "intent_kind": "general_rental",
                     }
                 ]
-            )
+            ),
+            readiness_evaluator=ready_readiness,
         )
 
         agent.handle_user_message("I need an apartment in Boston")

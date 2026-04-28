@@ -39,20 +39,30 @@ Return exactly one JSON object. Do not choose providers and do not mention scrap
 Use null for unknown scalar values, false for unknown booleans, and [] for unknown lists.
 
 Allowed keys:
-location, min_price, max_price, bedrooms, bedroom_min, bedroom_max, bathrooms,
+location, neighborhoods, avoid_neighborhoods, min_price, max_price,
+price_basis, bedrooms, bedroom_min, bedroom_max, bathrooms,
 bathroom_min, property_types, type_of_places, pet_policy, furnished,
-move_in_date, move_out_date, amenities, sort, map_bounds, photos,
+move_in_date, move_out_date, lease_length, campus_or_school,
+commute_target, max_commute_minutes, roommate_count, amenities,
+required_amenities, preferred_amenities, dealbreakers, safety_priority,
+student_priority, sort, map_bounds, photos,
 verified_listings, featured, page, section8, income_restricted,
 wheelchair_accessible, utilities_included, washer_dryer, keyword,
-intent_kind, notes.
+intent_kind, flexibility_notes, notes.
 
 Field guidance:
 - location should be a city/neighborhood/campus area/ZIP as stated or reasonably inferred.
+- For campus searches, fill campus_or_school and a practical location, but do not turn the request into all property_types unless the user explicitly says they are open to all property types.
+- For summer programs, summer internships, semesters, or sublets, set intent_kind to student_sublet when appropriate and preserve timing in move dates, lease_length, or notes.
+- If the user says they do not know budget, room type, or timing, preserve that uncertainty in flexibility_notes instead of fabricating a value.
 - Dates should be ISO-like YYYY-MM-DD when a specific date is clear; otherwise preserve useful timing in notes.
 - property_types can include Apartment, House, Townhouse, Condo.
 - type_of_places can include Private room, Shared room, Entire place.
 - pet_policy should preserve explicit pet constraints like dogs, cats, pet friendly, no pets.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
+- Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
+- price_basis should be one of total, per_person, per_room, unknown.
+- safety_priority and student_priority should be low, medium, high, or unknown.
 - section8, income_restricted, wheelchair_accessible, utilities_included, washer_dryer are true only when explicit.
 - intent_kind should be one of student_sublet, general_rental, affordable, apartment, unknown.
 - notes should preserve constraints that do not fit cleanly into fields.
@@ -70,20 +80,30 @@ Use null for unknown scalar values, false for unknown booleans, and [] for unkno
 Do not choose providers, build URLs, mention scraping, emit browser settings, or output commands.
 
 Allowed keys:
-location, min_price, max_price, bedrooms, bedroom_min, bedroom_max, bathrooms,
+location, neighborhoods, avoid_neighborhoods, min_price, max_price,
+price_basis, bedrooms, bedroom_min, bedroom_max, bathrooms,
 bathroom_min, property_types, type_of_places, pet_policy, furnished,
-move_in_date, move_out_date, amenities, sort, map_bounds, photos,
+move_in_date, move_out_date, lease_length, campus_or_school,
+commute_target, max_commute_minutes, roommate_count, amenities,
+required_amenities, preferred_amenities, dealbreakers, safety_priority,
+student_priority, sort, map_bounds, photos,
 verified_listings, featured, page, section8, income_restricted,
 wheelchair_accessible, utilities_included, washer_dryer, keyword,
-intent_kind, notes.
+intent_kind, flexibility_notes, notes.
 
 Field guidance:
 - location should be a city/neighborhood/campus area/ZIP as stated or reasonably inferred.
+- For campus searches, fill campus_or_school and a practical location, but do not turn the request into all property_types unless the user explicitly says they are open to all property types.
+- For summer programs, summer internships, semesters, or sublets, set intent_kind to student_sublet when appropriate and preserve timing in move dates, lease_length, or notes.
+- If the user says they do not know budget, room type, or timing, preserve that uncertainty in flexibility_notes instead of fabricating a value.
 - Dates should be ISO-like YYYY-MM-DD when a specific date is clear; otherwise preserve useful timing in notes.
 - property_types can include Apartment, House, Townhouse, Condo.
 - type_of_places can include Private room, Shared room, Entire place.
 - pet_policy should preserve explicit pet constraints like dogs, cats, pet friendly, no pets.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
+- Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
+- price_basis should be one of total, per_person, per_room, unknown.
+- safety_priority and student_priority should be low, medium, high, or unknown.
 - section8, income_restricted, wheelchair_accessible, utilities_included, washer_dryer are true only when explicit.
 - intent_kind should be one of student_sublet, general_rental, affordable, apartment, unknown.
 - notes should preserve constraints that do not fit cleanly into fields.
@@ -221,8 +241,11 @@ def parse_json_object(text: str) -> dict[str, Any]:
 def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
     normalized = {
         "location": _optional_string(data.get("location")),
+        "neighborhoods": _string_tuple(data.get("neighborhoods")),
+        "avoid_neighborhoods": _string_tuple(data.get("avoid_neighborhoods")),
         "min_price": _optional_int(data.get("min_price")),
         "max_price": _optional_int(data.get("max_price")),
+        "price_basis": _choice_string(data.get("price_basis"), {"total", "per_person", "per_room", "unknown"}, "unknown"),
         "bedrooms": _optional_int(data.get("bedrooms")),
         "bedroom_min": _optional_int(data.get("bedroom_min")),
         "bedroom_max": _optional_int(data.get("bedroom_max")),
@@ -234,7 +257,17 @@ def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
         "furnished": _optional_bool(data.get("furnished")),
         "move_in_date": _optional_string(data.get("move_in_date") or data.get("movein")),
         "move_out_date": _optional_string(data.get("move_out_date") or data.get("moveout")),
+        "lease_length": _optional_string(data.get("lease_length")),
+        "campus_or_school": _optional_string(data.get("campus_or_school")),
+        "commute_target": _optional_string(data.get("commute_target")),
+        "max_commute_minutes": _optional_int(data.get("max_commute_minutes")),
+        "roommate_count": _optional_int(data.get("roommate_count")),
         "amenities": _string_tuple(data.get("amenities")),
+        "required_amenities": _string_tuple(data.get("required_amenities")),
+        "preferred_amenities": _string_tuple(data.get("preferred_amenities")),
+        "dealbreakers": _string_tuple(data.get("dealbreakers")),
+        "safety_priority": _choice_string(data.get("safety_priority"), {"low", "medium", "high", "unknown"}, "unknown"),
+        "student_priority": _choice_string(data.get("student_priority"), {"low", "medium", "high", "unknown"}, "unknown"),
         "sort": _optional_string(data.get("sort")),
         "map_bounds": _map_bounds(data.get("map_bounds")),
         "photos": _bool(data.get("photos")),
@@ -248,6 +281,7 @@ def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
         "washer_dryer": _bool(data.get("washer_dryer")),
         "keyword": _optional_string(data.get("keyword")),
         "intent_kind": _intent_kind(data.get("intent_kind")),
+        "flexibility_notes": _string_tuple(data.get("flexibility_notes")),
         "notes": _string_tuple(data.get("notes")),
     }
 
@@ -344,3 +378,11 @@ def _intent_kind(value: Any) -> str | None:
     if text in {"student_sublet", "general_rental", "affordable", "apartment", "unknown"}:
         return text
     return text or None
+
+
+def _choice_string(value: Any, allowed: set[str], default: str) -> str:
+    text = _optional_string(value)
+    if not text:
+        return default
+    normalized = text.strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else default

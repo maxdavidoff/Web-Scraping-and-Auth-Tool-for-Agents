@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from src.housing_agent.interactive_agent import InteractiveHousingAgent
+from src.housing_agent.types import ListingRankingResult, RankedListing, SearchReadiness
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "housing_chat_transcripts.json"
@@ -44,6 +45,31 @@ def fake_router_result(provider: str):
     return SimpleNamespace(provider_results=[provider_result], records=[record], errors={})
 
 
+def ready_readiness(intent, **kwargs):
+    return SearchReadiness(
+        ready_to_search=True,
+        ready_to_recommend=True,
+        confidence="high",
+        next_action="request_confirmation",
+        reasoning_summary="I have enough information to run a targeted search.",
+    )
+
+
+def fake_listing_ranker(intent, readiness, records, **kwargs):
+    record = records[0]
+    return ListingRankingResult(
+        recommended=(
+            RankedListing(
+                title=record["title"],
+                fit_score=90,
+                why_it_fits="Matches the transcript scenario.",
+                provider=record["provider"],
+            ),
+        ),
+        overall_summary="Ranked transcript result.",
+    )
+
+
 class HousingChatTranscriptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -63,6 +89,8 @@ class HousingChatTranscriptTests(unittest.TestCase):
                 agent = InteractiveHousingAgent(
                     client=FakeJsonClient(scenario["model_responses"]),
                     runner=Mock(side_effect=router),
+                    readiness_evaluator=ready_readiness,
+                    listing_ranker=fake_listing_ranker,
                     max_listings=5,
                 )
 

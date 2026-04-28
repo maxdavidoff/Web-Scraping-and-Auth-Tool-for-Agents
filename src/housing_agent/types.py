@@ -30,8 +30,11 @@ SOURCE_APPLICABLE_CATEGORIES = frozenset(
 @dataclass(frozen=True)
 class HousingSearchIntent:
     location: str | None = None
+    neighborhoods: tuple[str, ...] = ()
+    avoid_neighborhoods: tuple[str, ...] = ()
     min_price: int | None = None
     max_price: int | None = None
+    price_basis: str = "unknown"
     bedrooms: int | None = None
     bedroom_min: int | None = None
     bedroom_max: int | None = None
@@ -43,7 +46,17 @@ class HousingSearchIntent:
     furnished: bool | None = None
     move_in_date: str | None = None
     move_out_date: str | None = None
+    lease_length: str | None = None
+    campus_or_school: str | None = None
+    commute_target: str | None = None
+    max_commute_minutes: int | None = None
+    roommate_count: int | None = None
     amenities: tuple[str, ...] = ()
+    required_amenities: tuple[str, ...] = ()
+    preferred_amenities: tuple[str, ...] = ()
+    dealbreakers: tuple[str, ...] = ()
+    safety_priority: str = "unknown"
+    student_priority: str = "unknown"
     sort: str | None = None
     map_bounds: Mapping[str, float] | None = None
     photos: bool = False
@@ -57,7 +70,46 @@ class HousingSearchIntent:
     washer_dryer: bool = False
     keyword: str | None = None
     intent_kind: str | None = None
+    flexibility_notes: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SearchReadiness:
+    ready_to_search: bool = False
+    ready_to_recommend: bool = False
+    confidence: str = "low"
+    next_action: str = "ask_followup"
+    missing_required_fields: tuple[str, ...] = ()
+    hard_constraints: tuple[str, ...] = ()
+    soft_preferences: tuple[str, ...] = ()
+    safe_assumptions: tuple[str, ...] = ()
+    followup_questions: tuple[str, ...] = ()
+    reasoning_summary: str = ""
+
+
+@dataclass(frozen=True)
+class RankedListing:
+    listing_id: str = ""
+    title: str = ""
+    url: str = ""
+    fit_score: float = 0.0
+    matched_constraints: tuple[str, ...] = ()
+    missing_info: tuple[str, ...] = ()
+    concerns: tuple[str, ...] = ()
+    why_it_fits: str = ""
+    provider: str = ""
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ListingRankingResult:
+    recommended: tuple[RankedListing, ...] = ()
+    needs_verification: tuple[RankedListing, ...] = ()
+    excluded: tuple[RankedListing, ...] = ()
+    overall_summary: str = ""
+    followup_suggestions: tuple[str, ...] = ()
+    raw_response: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -74,12 +74,27 @@ Try the interactive chat agent:
 python run_housing_chat.py --max-listings 5
 ```
 
-The chat agent proposes the best provider and asks before running it. Reply `yes` to execute the proposed search, or `no` to keep planning.
+The chat agent:
+
+1. updates a provider-neutral housing intent from the conversation,
+2. evaluates whether the search is ready or needs a useful follow-up,
+3. proposes the best provider to run first,
+4. asks before executing anything,
+5. ranks returned listings against the intent after execution.
+
+Reply `yes` to execute the proposed search, or `no` to keep planning. Use `json` inside the chat to inspect the current intent, readiness object, provider plan, execution state, and ranking output.
 
 Execute only when you explicitly want live scrapers to run:
 
 ```bash
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
+```
+
+No live LLM or browser scrape tests run by default. Use these only when you explicitly want live calls:
+
+```bash
+RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY="..." python3 -m unittest tests.test_intent_extractor -v
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
 AffordableHousing.com:
