@@ -295,6 +295,14 @@ Live browser scrape tests are skipped by default. To opt in:
 RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
+For a narrower local readiness check that runs only the live scrape tests:
+
+```bash
+python3 run_live_scrape_tests.py --install-chromium
+```
+
+Use `--all` if you want full unittest discovery with live tests enabled.
+
 ## AffordableHousing.com tool
 
 This repo also includes a parallel AffordableHousing.com tool with the same manual-first workflow:

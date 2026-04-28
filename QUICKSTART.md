@@ -15,6 +15,12 @@ Run the automated tests. Live browser scrape tests are skipped unless you set
 python3 -m unittest discover -s tests -v
 ```
 
+Run only the live scrape tests locally:
+
+```bash
+python3 run_live_scrape_tests.py --install-chromium
+```
+
 Save login:
 
 ```bash

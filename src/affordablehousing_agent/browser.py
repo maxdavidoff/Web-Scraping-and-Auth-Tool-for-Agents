@@ -25,7 +25,8 @@ def build_context(
 
     context = browser.new_context(**kwargs)
     page = context.new_page()
-    page.set_default_timeout(10_000)
+    page.set_default_timeout(30_000)
+    page.set_default_navigation_timeout(45_000)
     return playwright, browser, context, page
 
 
