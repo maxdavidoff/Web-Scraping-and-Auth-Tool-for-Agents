@@ -279,10 +279,131 @@ and log in again.
 5. Tighten selectors.
 6. Only then try automated search.
 
+## Automated tests
+
+Run the automated tests with:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m playwright install chromium
+python3 -m unittest discover -s tests -v
+```
+
+Live browser scrape tests are skipped by default. To opt in:
+
+```bash
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
+```
+
+For a narrower local readiness check that runs only the live scrape tests:
+
+```bash
+python3 run_live_scrape_tests.py --install-chromium
+```
+
+Use `--all` if you want full unittest discovery with live tests enabled.
+
+## AffordableHousing.com tool
+
+This repo also includes a parallel AffordableHousing.com tool with the same manual-first workflow:
+
+```bash
+python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
+```
+
+Login is optional for public searches, but this saves a browser session to:
+
+```text
+auth/affordablehousing_state.json
+```
+
+Run a manual extraction test:
+
+```bash
+python run_affordablehousing_search.py \
+  --search-url "https://www.affordablehousing.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+Or build an AffordableHousing.com SEO search URL from CLI filters:
+
+```bash
+python run_affordablehousing_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --selectors-file selectors.affordablehousing.json \
+  --max-listings 20
+```
+
+Outputs appear in:
+
+```text
+data/raw/affordablehousing_results_YYYYMMDD_HHMMSS.jsonl
+data/processed/affordablehousing_results_YYYYMMDD_HHMMSS.csv
+data/debug/affordablehousing_search_page.png
+data/debug/affordablehousing_search_page.html
+```
+
+If extraction breaks, inspect `data/debug/affordablehousing_search_page.html` and update `selectors.affordablehousing.json`.
+
+## RentalSource tool
+
+This repo also includes a parallel RentalSource tool with the same browser/session/result-saving workflow:
+
+```bash
+python save_rentalsource_login.py --start-url "https://www.rentalsource.com/"
+```
+
+RentalSource listings are public, so saving a login session is optional unless you need account-specific behavior. Run a filtered search like this:
+
+```bash
+python run_rentalsource_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --num-bedrooms 1 \
+  --num-bathrooms 1 \
+  --min-price 1000 \
+  --max-price 3000 \
+  --sort price \
+  --max-listings 20
+```
+
+The RentalSource script accepts the same manual-search and keep-open workflow:
+
+```bash
+python run_rentalsource_search.py \
+  --search-url "https://www.rentalsource.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+To enrich extracted cards with detail-page JSON-LD fields such as exact address, latitude, longitude, beds, baths, and price range:
+
+```bash
+python run_rentalsource_search.py \
+  --location "Boston, MA" \
+  --max-listings 10 \
+  --fetch-listing-detail
+```
+
+RentalSource outputs appear beside the other outputs:
+
+```text
+data/raw/rentalsource_results_YYYYMMDD_HHMMSS.jsonl
+data/processed/rentalsource_results_YYYYMMDD_HHMMSS.csv
+data/debug/rentalsource_search_page.png
+data/debug/rentalsource_search_page.html
+```
+
+If extraction breaks, inspect `data/debug/rentalsource_search_page.html` and update `selectors.rentalsource.json`.
+
 ## Safety / compliance notes
 
 - Do not bypass Cloudflare, CAPTCHAs, private APIs, or security controls.
 - Keep volume low.
 - Use your own account only.
 - Do not collect private user information you are not allowed to store.
-- Do not commit `auth/ohana_state.json` or `.env`.
+- Do not commit `auth/*_state.json` or `.env`.

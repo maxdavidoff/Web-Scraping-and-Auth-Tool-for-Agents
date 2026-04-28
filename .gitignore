@@ -9,3 +9,9 @@ auth/*.json
 data/raw/*
 data/processed/*
 data/debug/*
+data/debug/**
+
+!auth/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/debug/.gitkeep

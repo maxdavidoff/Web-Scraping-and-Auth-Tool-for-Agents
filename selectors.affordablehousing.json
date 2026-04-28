@@ -1,0 +1,62 @@
+{
+  "notes": "AffordableHousing.com server-rendered rental result selectors. Start in --manual-search mode first, then inspect data/debug/affordablehousing_search_page.html if the site changes.",
+  "search_input_selectors": [
+    "input[placeholder*='Find Affordable Housing' i]",
+    "input[placeholder*='City' i]",
+    "input[placeholder*='location' i]",
+    "input[type='search']",
+    "input[name*='search' i]"
+  ],
+  "result_card_selectors": [
+    ".listing--cards-v2 .premiumcard.jq-cardhover, .listing--cards-v2 .freecard.jq-cardhover",
+    ".listing--cards-v2 .premiumcard, .listing--cards-v2 .freecard",
+    ".listing--cards-v2 [data-communityid]",
+    ".listing--cards-v2 [id^='premium-card'], .listing--cards-v2 [id^='tnresult-card']",
+    ".premiumcard.jq-cardhover",
+    ".freecard.jq-cardhover",
+    ".premiumcard",
+    ".freecard"
+  ],
+  "detail_link_selectors": [
+    "a[href*='affordablehousing.com'][href*='-']",
+    "a[href]"
+  ],
+  "title_selectors": [
+    ".premiumcard--communityname",
+    ".freecard--communityname",
+    ".property--comment"
+  ],
+  "title_attr_selectors": [
+    ".premiumcard--imgholder img[alt]",
+    ".freecard--imgholder img[alt]",
+    "img[alt]"
+  ],
+  "price_selectors": [
+    ".premiumcard--price",
+    ".freecard--price"
+  ],
+  "location_selectors": [
+    ".tnresult--propertyaddress",
+    ".premiumcard--address",
+    ".freecard--address"
+  ],
+  "availability_selectors": [
+    ".available--txt"
+  ],
+  "bedrooms_selectors": [
+    ".premiumcard--details span:has-text(\"beds\")",
+    ".premiumcard--details span:has-text(\"bed\")",
+    ".freecard--details span:has-text(\"beds\")",
+    ".freecard--details span:has-text(\"bed\")"
+  ],
+  "bathrooms_selectors": [
+    ".premiumcard--details span:has-text(\"baths\")",
+    ".premiumcard--details span:has-text(\"bath\")",
+    ".freecard--details span:has-text(\"baths\")",
+    ".freecard--details span:has-text(\"bath\")"
+  ],
+  "sqft_selectors": [],
+  "property_type_selectors": [
+    ".details-category"
+  ]
+}

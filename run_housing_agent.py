@@ -14,7 +14,7 @@ from src.ohana_agent.housing_agent import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Use an LLM to plan a student housing search, then run the Ohana scraper."
+        description="Use an LLM to plan a student housing search, then run one or more provider scrapers."
     )
     parser.add_argument("request", nargs="*", help="Optional natural language housing request to seed the intake.")
     parser.add_argument("--model", default=DEFAULT_AGENT_MODEL, help="OpenAI model to use for planning/summarizing.")
@@ -25,6 +25,12 @@ def main() -> None:
     parser.add_argument("--scrolls", type=int, default=3, help="How many times to scroll before extraction.")
     parser.add_argument("--headed", action="store_true", help="Show the browser while scraping.")
     parser.add_argument("--one-shot", action="store_true", help="Skip intake follow-ups and search from the request immediately.")
+    parser.add_argument(
+        "--providers",
+        nargs="+",
+        default=None,
+        help="Provider(s) to search: ohana, rentalsource, affordablehousing, or all. Defaults to the LLM plan.",
+    )
     parser.add_argument(
         "--fetch-listing-api",
         action="store_true",
@@ -62,11 +68,23 @@ def main() -> None:
         headless=not args.headed,
         fetch_listing_api=args.fetch_listing_api,
         capture_detail_urls=args.capture_detail_urls,
+        providers=args.providers,
         summarize=not args.no_summary,
     )
 
     print("\nSearch plan:")
     print(json.dumps(asdict(result.plan), indent=2, ensure_ascii=False))
+    print("\nProvider results:")
+    for provider_result in result.search.provider_results:
+        print(
+            f"- {provider_result.provider}: {provider_result.status}, "
+            f"{len(provider_result.records)} records"
+        )
+        if provider_result.search_url:
+            print(f"  Search URL: {provider_result.search_url}")
+        if provider_result.error:
+            print(f"  Error: {provider_result.error}")
+
     print(f"\nSearch URL: {result.search.search_url}")
     print(f"CSV: {result.search.csv_output}")
     print(f"JSONL: {result.search.raw_output}")

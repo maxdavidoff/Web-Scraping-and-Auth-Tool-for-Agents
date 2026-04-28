@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
-from .search_runner import OhanaSearchOptions, OhanaSearchResult, run_ohana_search
+from .provider_router import RoutedSearchResult, normalize_provider_names, run_provider_searches
+from .search_runner import OhanaSearchOptions
 
 
 DEFAULT_AGENT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -16,6 +17,7 @@ DEFAULT_AGENT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 @dataclass(frozen=True)
 class StudentHousingSearchPlan:
     location: str
+    providers: list[str] | None = None
     movein: str | None = None
     moveout: str | None = None
     property_types: list[str] | None = None
@@ -33,7 +35,7 @@ class StudentHousingSearchPlan:
 @dataclass(frozen=True)
 class StudentHousingAgentResult:
     plan: StudentHousingSearchPlan
-    search: OhanaSearchResult
+    search: RoutedSearchResult
     summary: str
 
 
@@ -45,15 +47,23 @@ class IntakeDecision:
 
 
 PLANNER_SYSTEM_PROMPT = """
-You plan Ohana housing searches for students.
+You plan housing searches for students across these providers:
+- ohana: student-oriented sublets, rooms, and leases.
+- rentalsource: public rental listings, especially apartments/houses.
+- affordablehousing: AffordableHousing.com listings, including income-restricted or Section 8 oriented searches.
 
 Convert the student's request into one JSON object with exactly these keys:
-location, movein, moveout, property_types, type_of_places, num_bedrooms,
-min_price, max_price, pet_policy, furnished_status, max_listings, notes,
-assumptions.
+providers, location, movein, moveout, property_types, type_of_places,
+num_bedrooms, min_price, max_price, pet_policy, furnished_status,
+max_listings, notes, assumptions.
 
 Rules:
-- location is required. Use a city/neighborhood/university area that Ohana search can understand.
+- providers is a list containing any of: "ohana", "rentalsource", "affordablehousing".
+- Default providers to ["ohana"] for ordinary student sublet/lease requests.
+- Use multiple providers when the request asks to search broadly, compare sources, or include affordable/public rentals.
+- Use "affordablehousing" when the student asks for affordable housing, income-restricted housing, vouchers, or Section 8.
+- Use "rentalsource" when the student asks for general market rentals outside student sublets.
+- location is required. Use a city/neighborhood/university area that housing search URLs can understand.
 - Format movein and moveout as 'Month D, YYYY', for example 'May 1, 2026'.
 - Use null when the student did not specify a filter.
 - property_types can include values such as 'Apartment' or 'House'.
@@ -71,7 +81,7 @@ Rules:
 
 
 INTAKE_SYSTEM_PROMPT = """
-You are a student-housing intake assistant before an Ohana search.
+You are a student-housing intake assistant before a provider-backed housing search.
 
 Given the conversation so far, either ask one follow-up question, finalize the
 search request, or end without searching. Return one JSON object with exactly:
@@ -214,7 +224,10 @@ def _plan_from_dict(data: dict[str, Any]) -> StudentHousingSearchPlan:
     if not location:
         raise ValueError("The housing request did not include enough information to infer a location.")
 
+    providers = _optional_string_list(data.get("providers")) or [normalize_provider_names(None)[0]]
+
     return StudentHousingSearchPlan(
+        providers=normalize_provider_names(providers),
         location=location,
         movein=_optional_string(data.get("movein")),
         moveout=_optional_string(data.get("moveout")),
@@ -406,16 +419,19 @@ def summarize_housing_results(
     model: str = DEFAULT_AGENT_MODEL,
 ) -> str:
     if not records:
-        return "I did not find any extracted listings for that search. Check the debug screenshot/HTML to see whether Ohana showed results or whether selectors need updating."
+        return "I did not find any extracted listings for that search. Check the provider debug screenshot/HTML to see whether the sites showed results or whether selectors need updating."
 
     client = _openai_client()
     compact_records = [
         {
+            "provider": record.get("provider") or record.get("source"),
             "title": record.get("title"),
             "price": record.get("price"),
-            "location": record.get("location") or record.get("listing_address"),
+            "location": record.get("address") or record.get("location") or record.get("listing_address"),
             "dates": record.get("dates"),
             "bedrooms": record.get("bedrooms"),
+            "bathrooms": record.get("bathrooms"),
+            "property_type": record.get("property_type"),
             "url": record.get("detail_url") or record.get("url"),
             "raw_text": str(record.get("raw_text", ""))[:800],
         }
@@ -454,20 +470,20 @@ def run_student_housing_agent(
     headless: bool = True,
     fetch_listing_api: bool = False,
     capture_detail_urls: bool = False,
+    providers: list[str] | str | None = None,
     summarize: bool = True,
 ) -> StudentHousingAgentResult:
     plan = plan_student_housing_search(user_request, model=model)
-    search = run_ohana_search(
-        plan_to_ohana_options(
-            plan,
-            state_file=state_file,
-            selectors_file=selectors_file,
-            max_listings_override=max_listings,
-            scrolls=scrolls,
-            headless=headless,
-            fetch_listing_api=fetch_listing_api,
-            capture_detail_urls=capture_detail_urls,
-        )
+    search = run_provider_searches(
+        plan,
+        providers=providers or plan.providers,
+        state_file=state_file,
+        selectors_file=selectors_file,
+        max_listings=max_listings,
+        scrolls=scrolls,
+        headless=headless,
+        fetch_listing_api=fetch_listing_api,
+        capture_detail_urls=capture_detail_urls,
     )
     summary = ""
     if summarize:
@@ -478,6 +494,9 @@ def run_student_housing_agent(
                 records=search.records,
                 model=model,
             )
+            if search.errors:
+                failed = ", ".join(f"{provider}: {error}" for provider, error in search.errors.items())
+                summary = f"{summary}\n\nProvider errors: {failed}" if summary else f"Provider errors: {failed}"
         except Exception as exc:
             summary = f"Summary unavailable after scraping: {exc}"
 
