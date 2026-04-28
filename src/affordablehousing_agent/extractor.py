@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
+if TYPE_CHECKING:
+    from playwright.sync_api import Locator, Page
+
+try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:
+    class PlaywrightTimeoutError(Exception):
+        pass
 
 from .parsing import clean_text, normalize_listing
 

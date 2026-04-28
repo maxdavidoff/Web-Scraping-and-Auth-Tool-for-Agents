@@ -1,0 +1,35 @@
+{
+  "notes": "RentalSource selectors. Search pages also include JSON-LD ItemList fallback records if card selectors stop matching.",
+  "search_input_selectors": [
+    "input[name='query']",
+    "input[placeholder*='Search by City' i]",
+    "input[placeholder*='Search' i]",
+    "input[type='search']"
+  ],
+  "result_card_selectors": [
+    "a[href*='/details/']:has(.card)",
+    "a[href*='/details/'][title*='for rent' i]",
+    "a[href*='/details/']"
+  ],
+  "detail_link_selectors": [
+    "a[href*='/details/']"
+  ],
+  "title_selectors": [
+    ".text-truncate.lh-sm strong",
+    ".card-body strong"
+  ],
+  "price_selectors": [
+    ".fs-largest strong",
+    "div[style*='letter-spacing'] strong",
+    "text=/\\$\\s?[0-9,]+/"
+  ],
+  "location_selectors": [
+    ".card-body div.mb-2.text-truncate:has-text(',')",
+    ".card-body div:has-text(', MA')",
+    ".card-body div:has-text(', NY')",
+    ".card-body div:has-text(', PA')"
+  ],
+  "property_type_selectors": [
+    ".card-body .mb-2.text-truncate"
+  ]
+}
