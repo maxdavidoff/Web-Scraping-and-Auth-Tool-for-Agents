@@ -28,14 +28,6 @@ def clean_text(text: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def first_nonempty(values: list[str]) -> str:
-    for value in values:
-        value = clean_text(value)
-        if value:
-            return value
-    return ""
-
-
 def guess_title(raw_text: str) -> str:
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
     if not lines:

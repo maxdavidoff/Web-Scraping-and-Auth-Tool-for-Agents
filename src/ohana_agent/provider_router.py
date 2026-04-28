@@ -408,6 +408,7 @@ def _normalize_record(provider: str, record: dict[str, Any]) -> dict[str, Any]:
     normalized["source"] = normalized.get("source") or provider
     normalized["listing_url"] = normalized.get("detail_url") or normalized.get("url") or ""
     normalized["address"] = normalized.get("listing_address") or normalized.get("location") or ""
+    _normalize_coordinate_metadata(provider, normalized)
     normalized["bathrooms"] = normalized.get("bathrooms", "")
     normalized["property_type"] = normalized.get("property_type", "")
     normalized["square_feet"] = normalized.get("square_feet") or normalized.get("sqft") or ""
@@ -415,6 +416,50 @@ def _normalize_record(provider: str, record: dict[str, Any]) -> dict[str, Any]:
     normalized["price_min"] = normalized.get("price_min", "")
     normalized["price_max"] = normalized.get("price_max", "")
     return normalized
+
+
+def _normalize_coordinate_metadata(provider: str, record: dict[str, Any]) -> None:
+    if record.get("listing_latitude") is not None and record.get("listing_longitude") is not None:
+        record["coordinates_status"] = "present"
+        record["coordinates_source"] = record.get("coordinates_source") or record.get("listing_location_source") or _default_coordinate_source(provider)
+        return
+
+    if record.get("coordinates_status"):
+        record["coordinates_source"] = record.get("coordinates_source") or _default_coordinate_source(provider)
+        return
+
+    if provider == OHANA and record.get("listing_api_status"):
+        record["coordinates_source"] = "ohana_init_data"
+        if record.get("listing_api_status") == "failed":
+            record["coordinates_status"] = "failed"
+            if record.get("listing_api_error"):
+                record["coordinates_error"] = record["listing_api_error"]
+        else:
+            record["coordinates_status"] = "missing"
+        return
+
+    if provider in {RENTALSOURCE, AFFORDABLEHOUSING} and record.get("listing_detail_status"):
+        record["coordinates_source"] = _default_coordinate_source(provider)
+        if record.get("listing_detail_status") == "failed":
+            record["coordinates_status"] = "failed"
+            if record.get("listing_detail_error"):
+                record["coordinates_error"] = record["listing_detail_error"]
+        else:
+            record["coordinates_status"] = "missing"
+        return
+
+    record["coordinates_status"] = "not_requested"
+    record["coordinates_source"] = _default_coordinate_source(provider)
+
+
+def _default_coordinate_source(provider: str) -> str:
+    if provider == OHANA:
+        return "ohana_init_data"
+    if provider == RENTALSOURCE:
+        return "detail_json_ld"
+    if provider == AFFORDABLEHOUSING:
+        return "server_side_variables"
+    return "unknown"
 
 
 def _provider_success_result(provider: str, result: Any, plan: Any) -> ProviderSearchResult:
@@ -531,6 +576,7 @@ def _run_provider(
                 scrolls=scrolls,
                 headless=headless,
                 capture_detail_urls=capture_detail_urls,
+                fetch_listing_detail=fetch_listing_api,
             )
         )
         return _provider_success_result(provider, result, plan)

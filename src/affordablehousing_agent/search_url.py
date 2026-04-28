@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
+from src.supported_locations import supported_location_for
+
 AFFORDABLEHOUSING_BASE_URL = "https://www.affordablehousing.com"
 
 PROPERTY_TYPE_SLUGS = {
@@ -18,33 +20,12 @@ PROPERTY_TYPE_SLUGS = {
     "condos": "condo",
 }
 
-CANONICAL_CITY_STATE_SLUGS = {
-    "boston": "boston-ma",
-    "new york": "new-york-ny",
-    "new york city": "new-york-ny",
-    "nyc": "new-york-ny",
-    "san francisco": "san-francisco-ca",
-    "sf": "san-francisco-ca",
-    "philadelphia": "philadelphia-pa",
-    "philly": "philadelphia-pa",
-    "washington dc": "washington-dc",
-    "washington d c": "washington-dc",
-}
-
-
 def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"\b(?:usa|united states|united states of america)\b", "", text)
     text = re.sub(r"[^a-z0-9]+", "-", text)
     text = re.sub(r"-+", "-", text)
     return text.strip("-")
-
-
-def _location_key(location: str) -> str:
-    text = location.lower().strip()
-    text = re.sub(r"\b(?:usa|us|united states|united states of america)\b", "", text)
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def location_to_slug(location: str) -> str:
@@ -54,7 +35,7 @@ def location_to_slug(location: str) -> str:
     Examples:
     - "Boston, MA" -> "boston-ma"
     - "Boston, MA, USA" -> "boston-ma"
-    - "Suffolk County, MA" -> "suffolk-county-ma"
+    - "University City" -> "philadelphia-pa"
     """
     if not location:
         raise ValueError("Location is required.")
@@ -63,18 +44,7 @@ def location_to_slug(location: str) -> str:
     if parsed.scheme and parsed.netloc:
         raise ValueError("location_to_slug expects a location, not a URL.")
 
-    parts = [part.strip() for part in location.split(",") if part.strip()]
-    if len(parts) >= 2 and parts[-1].lower() in {"usa", "us", "united states"}:
-        parts = parts[:-1]
-
-    if len(parts) >= 2:
-        return _slugify(f"{parts[0]} {parts[1]}")
-
-    key = _location_key(location)
-    if key in CANONICAL_CITY_STATE_SLUGS:
-        return CANONICAL_CITY_STATE_SLUGS[key]
-
-    return _slugify(location)
+    return supported_location_for(location).city_state_slug
 
 
 def _bedroom_slug(num_bedrooms: int | None) -> str:

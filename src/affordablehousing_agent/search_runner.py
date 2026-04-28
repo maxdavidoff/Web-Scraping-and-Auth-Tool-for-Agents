@@ -10,6 +10,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser import build_context, save_storage_state
 from .config import DEBUG_DIR, PROCESSED_DIR, RAW_DIR, ensure_dirs, get_settings, load_selectors
+from .detail import annotate_coordinate_status, enrich_record_with_detail
 from .extractor import extract_listings, save_debug_artifacts
 from .search_url import build_affordablehousing_search_url
 from .storage import write_csv, write_jsonl
@@ -37,6 +38,8 @@ class AffordableHousingSearchOptions:
     manual_search: bool = False
     keep_open: bool = False
     capture_detail_urls: bool = False
+    fetch_listing_detail: bool = False
+    save_detail_debug: bool = False
 
 
 @dataclass(frozen=True)
@@ -159,7 +162,7 @@ def run_affordablehousing_search(options: AffordableHousingSearchOptions) -> Aff
             page,
             selectors,
             max_listings=options.max_listings,
-            capture_detail_urls=options.capture_detail_urls,
+            capture_detail_urls=options.capture_detail_urls or options.fetch_listing_detail,
         )
 
         fallback_location = options.location or settings.location
@@ -190,8 +193,19 @@ def run_affordablehousing_search(options: AffordableHousingSearchOptions) -> Aff
                     page,
                     selectors,
                     max_listings=options.max_listings,
-                    capture_detail_urls=options.capture_detail_urls,
+                    capture_detail_urls=options.capture_detail_urls or options.fetch_listing_detail,
                 )
+
+        if options.fetch_listing_detail:
+            print("\nFetching AffordableHousing detail pages for listing coordinates...")
+            detail_debug_dir = DEBUG_DIR / "affordablehousing_detail" if options.save_detail_debug else None
+            for i, record in enumerate(records, start=1):
+                print(f"[{i}/{len(records)}] {record.get('title', 'Untitled listing')}")
+                enrich_record_with_detail(page=page, record=record, debug_dir=detail_debug_dir)
+                page.wait_for_timeout(500)
+        else:
+            for record in records:
+                annotate_coordinate_status(record, enrichment_requested=False)
 
         jsonl_count = write_jsonl(records, raw_output)
         csv_count = write_csv(records, csv_output)

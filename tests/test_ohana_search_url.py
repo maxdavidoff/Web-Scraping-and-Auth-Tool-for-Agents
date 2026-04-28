@@ -10,25 +10,26 @@ class OhanaSearchUrlTests(unittest.TestCase):
     def test_slugify_location_uses_only_supported_ohana_city_slugs(self) -> None:
         self.assertEqual(slugify_location("Boston, MA, USA"), "boston")
         self.assertEqual(slugify_location("New York, NY"), "new-york-city")
-        self.assertEqual(slugify_location("San Francisco, CA"), "san-francisco")
+        self.assertEqual(slugify_location("Washington, DC"), "washington")
+        self.assertEqual(slugify_location("Philadelphia, PA"), "philadelphia")
 
     def test_slugify_location_maps_known_neighborhoods_to_supported_ohana_cities(self) -> None:
         self.assertEqual(slugify_location("Cambridge"), "boston")
         self.assertEqual(slugify_location("Williamsburg"), "new-york-city")
-        self.assertEqual(slugify_location("Mission District"), "san-francisco")
+        self.assertEqual(slugify_location("Georgetown"), "washington")
+        self.assertEqual(slugify_location("University City"), "philadelphia")
 
     def test_slugify_location_rejects_unsupported_places(self) -> None:
         with self.assertRaisesRegex(ValueError, "only support"):
-            slugify_location("Philadelphia, PA")
-        with self.assertRaisesRegex(ValueError, "only support"):
-            slugify_location("Washington, DC")
+            slugify_location("San Francisco, CA")
         with self.assertRaisesRegex(ValueError, "only support"):
             slugify_location("02139")
 
     def test_format_location_label_uses_supported_ohana_city_labels(self) -> None:
         self.assertEqual(format_location_label("Boston, MA"), "Boston, MA, USA")
         self.assertEqual(format_location_label("New York, NY"), "New York, NY, USA")
-        self.assertEqual(format_location_label("San Francisco, CA"), "San Francisco, CA, USA")
+        self.assertEqual(format_location_label("Washington, DC"), "Washington, DC, USA")
+        self.assertEqual(format_location_label("Philadelphia, PA"), "Philadelphia, PA, USA")
         self.assertEqual(format_location_label("Cambridge"), "Boston, MA, USA")
 
     def test_build_search_url_uses_canonical_sublet_path_and_observed_params(self) -> None:
@@ -87,6 +88,19 @@ class OhanaSearchUrlTests(unittest.TestCase):
         self.assertEqual(urlparse(url).path, "/sublet/boston")
         self.assertEqual(query["movein"], ["May 1, 2026"])
         self.assertEqual(query["moveout"], ["August 31, 2026"])
+
+    def test_build_search_url_supports_product_cities(self) -> None:
+        expected_paths = {
+            "Boston, MA": "/sublet/boston",
+            "New York, NY": "/sublet/new-york-city",
+            "Washington, DC": "/sublet/washington",
+            "Philadelphia, PA": "/sublet/philadelphia",
+        }
+
+        for location, expected_path in expected_paths.items():
+            with self.subTest(location=location):
+                url = build_ohana_search_url(location=location)
+                self.assertEqual(urlparse(url).path, expected_path)
 
 
 if __name__ == "__main__":

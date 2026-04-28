@@ -4,6 +4,8 @@ This is a small, test-first housing search project for logging into housing prov
 
 It intentionally does **not** bypass Cloudflare, CAPTCHAs, login protections, private APIs, or rate limits. Use it only with an account you are allowed to use and only at low, human-like volume.
 
+Supported search markets are currently Boston, MA; New York, NY; Washington, DC; and Philadelphia, PA. Known neighborhoods inside those markets, such as University City for Philadelphia, are mapped back to the supported city search.
+
 ## What it does
 
 1. Extracts or updates a provider-neutral `HousingSearchIntent` from user language.
@@ -216,6 +218,8 @@ PYTHONPATH=src python -u run_ohana_search.py \
 ```
 
 If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
+
+Ohana only writes exact coordinates when `--fetch-listing-api` is enabled and a real `/listing/...` detail URL is available. Each output record includes `coordinates_status` and `coordinates_source` so missing coordinates are explicit instead of silent.
 
 ## Query planning layer
 
@@ -431,6 +435,16 @@ python run_affordablehousing_search.py \
   --max-listings 20
 ```
 
+To enrich extracted cards with exact detail-page address and coordinates when available:
+
+```bash
+python run_affordablehousing_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --max-listings 10 \
+  --fetch-listing-detail
+```
+
 Outputs appear in:
 
 ```text
@@ -441,6 +455,8 @@ data/debug/affordablehousing_search_page.html
 ```
 
 If extraction breaks, inspect `data/debug/affordablehousing_search_page.html` and update `selectors.affordablehousing.json`.
+
+AffordableHousing detail enrichment validates that detail URLs belong to `affordablehousing.com` before fetching them. Coordinate fields are written as `listing_latitude`, `listing_longitude`, `coordinates_status`, and `coordinates_source`.
 
 ## RentalSource tool
 
@@ -482,6 +498,8 @@ python run_rentalsource_search.py \
   --max-listings 10 \
   --fetch-listing-detail
 ```
+
+Without detail enrichment, RentalSource records still include `coordinates_status=not_requested`. With enrichment, coordinates come from detail-page JSON-LD when present.
 
 RentalSource outputs appear beside the other outputs:
 

@@ -2,22 +2,11 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-from src.rentalsource_agent.browser import build_context, save_storage_state
-from src.rentalsource_agent.config import DEBUG_DIR, PROCESSED_DIR, RAW_DIR, ensure_dirs, get_settings, load_selectors
-from src.rentalsource_agent.detail import enrich_record_with_detail
-from src.rentalsource_agent.extractor import extract_listings, save_debug_artifacts
-from src.rentalsource_agent.search_url import build_rentalsource_search_url
-from src.rentalsource_agent.storage import write_csv, write_jsonl
-
-
-def scroll_for_results(page, scrolls: int, pause_ms: int) -> None:
-    for _ in range(max(scrolls, 0)):
-        page.mouse.wheel(0, 2200)
-        page.wait_for_timeout(pause_ms)
+from src.rentalsource_agent.search_runner import (
+    RentalSourceSearchOptions,
+    run_rentalsource_search,
+)
 
 
 def _any_truthy(values: list[str] | None) -> bool:
@@ -84,14 +73,9 @@ def main() -> None:
     parser.add_argument("--furnished-status", nargs="+", default=None, help="Accepted for Ohana CLI parity; ignored.")
     args = parser.parse_args()
 
-    ensure_dirs()
-    if args.search_url:
-        search_url = args.search_url
-    else:
-        if not args.location:
-            raise ValueError("Provide either --search-url or --location.")
-
-        search_url = build_rentalsource_search_url(
+    run_rentalsource_search(
+        RentalSourceSearchOptions(
+            search_url=args.search_url,
             location=args.location,
             property_types=args.property_types,
             num_bedrooms=args.num_bedrooms,
@@ -104,106 +88,17 @@ def main() -> None:
             featured=args.featured,
             sort=args.sort,
             page=args.page,
-        )
-
-    print(f"Using search URL: {search_url}")
-
-    settings = get_settings(
-        search_url=search_url,
-        location=args.location,
-        state_file=args.state_file,
-        selectors_file=args.selectors_file,
-    )
-    selectors = load_selectors(settings.selectors_file)
-
-    state_file = settings.state_file if settings.state_file.exists() else None
-    if state_file:
-        print(f"Using saved RentalSource session: {state_file}")
-    else:
-        print(f"No saved RentalSource session found at {settings.state_file}; continuing with a public session.")
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    raw_output = RAW_DIR / f"rentalsource_results_{timestamp}.jsonl"
-    csv_output = PROCESSED_DIR / f"rentalsource_results_{timestamp}.csv"
-
-    playwright, browser, context, page = build_context(
-        headless=args.headless,
-        state_file=state_file,
-        slow_mo_ms=100,
-    )
-    try:
-        print(f"Opening search page: {search_url}")
-        page.goto(search_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(2_000)
-
-        if args.manual_search:
-            print("\nRun the search manually in the browser window.")
-            print("When the results are visible, return here and press ENTER.")
-            input("Press ENTER to extract visible results... ")
-        else:
-            print("Using RentalSource URL directly; skipping automated search input.")
-            try:
-                page.wait_for_load_state("networkidle", timeout=8_000)
-            except PlaywrightTimeoutError:
-                pass
-            page.wait_for_timeout(2_000)
-
-        scroll_for_results(page, args.scrolls, pause_ms=1_000)
-        debug = save_debug_artifacts(page, DEBUG_DIR)
-        print("Calling extract_listings...")
-        records = extract_listings(
-            page,
-            selectors,
+            state_file=args.state_file,
+            selectors_file=args.selectors_file,
             max_listings=args.max_listings,
+            scrolls=args.scrolls,
+            headless=args.headless,
+            manual_search=args.manual_search,
+            keep_open=args.keep_open,
+            fetch_listing_detail=args.fetch_listing_detail or args.fetch_listing_api,
+            save_detail_debug=args.save_detail_debug,
         )
-
-        if args.fetch_listing_detail or args.fetch_listing_api:
-            print("\nFetching RentalSource detail pages for each extracted record...")
-            detail_debug_dir = DEBUG_DIR / "rentalsource_detail" if args.save_detail_debug else None
-            for i, record in enumerate(records, start=1):
-                detail_url = record.get("detail_url") or record.get("url")
-                print(f"[{i}/{len(records)}] {record.get('title', 'Untitled listing')}")
-                print(f"  detail_url: {detail_url}")
-
-                enrich_record_with_detail(
-                    page=page,
-                    record=record,
-                    debug_dir=detail_debug_dir,
-                )
-
-                status = record.get("listing_detail_status")
-                if status == "ok":
-                    print(
-                        f"  exact location: "
-                        f"{record.get('listing_latitude')}, "
-                        f"{record.get('listing_longitude')}"
-                    )
-                    print(f"  address: {record.get('listing_address')}")
-                else:
-                    print(f"  detail status: {status}")
-
-                page.wait_for_timeout(500)
-
-        jsonl_count = write_jsonl(records, raw_output)
-        csv_count = write_csv(records, csv_output)
-        save_storage_state(context, settings.state_file)
-
-        print("\nDone.")
-        print(f"Extracted records: {len(records)}")
-        print(f"JSONL: {raw_output} ({jsonl_count} records)")
-        print(f"CSV:   {csv_output} ({csv_count} records)")
-        print(f"Debug screenshot: {debug.get('screenshot')}")
-        print(f"Debug HTML:       {debug.get('html')}")
-        if len(records) == 0:
-            print("\nNo records were extracted. Open data/debug/rentalsource_search_page.html, inspect the listing card HTML,")
-            print("then update selectors.rentalsource.json and rerun with --manual-search.")
-
-        if args.keep_open:
-            input("\nPress ENTER to close the browser... ")
-    finally:
-        context.close()
-        browser.close()
-        playwright.stop()
+    )
 
 
 if __name__ == "__main__":

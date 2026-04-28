@@ -147,12 +147,17 @@ class FakeSearchPage:
 class RentalSourceUrlTests(unittest.TestCase):
     def test_slugify_location_handles_city_state_zip_and_empty_values(self) -> None:
         self.assertEqual(slugify_location("Boston, MA, USA"), "boston-ma")
-        self.assertEqual(slugify_location("New York City, NY"), "new-york-city-ny")
+        self.assertEqual(slugify_location("New York City, NY"), "new-york-ny")
+        self.assertEqual(slugify_location("Washington, DC"), "washington-dc")
+        self.assertEqual(slugify_location("Philadelphia, PA"), "philadelphia-pa")
         self.assertEqual(slugify_location("Boston, MA 02118"), "boston-ma-02118")
-        self.assertEqual(slugify_location("Cambridge, MA 02139, USA"), "cambridge-ma-02139")
-        self.assertEqual(slugify_location("02139"), "02139")
+        self.assertEqual(slugify_location("Cambridge, MA 02139, USA"), "boston-ma-02139")
         with self.assertRaises(ValueError):
             slugify_location("   ")
+        with self.assertRaises(ValueError):
+            slugify_location("02139")
+        with self.assertRaises(ValueError):
+            slugify_location("San Francisco, CA")
 
     def test_build_search_url_uses_confirmed_rentalsource_filter_params(self) -> None:
         url = build_rentalsource_search_url(
@@ -315,6 +320,8 @@ class RentalSourceDetailTests(unittest.TestCase):
             debug_data = json.loads(debug_path.read_text(encoding="utf-8"))
 
         self.assertEqual(enriched["listing_detail_status"], "ok")
+        self.assertEqual(enriched["coordinates_status"], "present")
+        self.assertEqual(enriched["coordinates_source"], "json_ld")
         self.assertEqual(enriched["listing_id"], "83402038")
         self.assertEqual(enriched["price"], "$3,214 - $4,054")
         self.assertEqual(
@@ -338,6 +345,7 @@ class RentalSourceDetailTests(unittest.TestCase):
         enriched = enrich_record_with_detail(page=page, record=record)
 
         self.assertEqual(enriched["listing_detail_status"], "failed")
+        self.assertEqual(enriched["coordinates_status"], "failed")
         self.assertIn("503", enriched["listing_detail_error"])
 
     def test_enrich_record_with_detail_does_not_fetch_untrusted_detail_url(self) -> None:
@@ -347,6 +355,7 @@ class RentalSourceDetailTests(unittest.TestCase):
         enriched = enrich_record_with_detail(page=page, record=record)
 
         self.assertEqual(enriched["listing_detail_status"], "skipped_invalid_detail_url")
+        self.assertEqual(enriched["coordinates_status"], "missing")
         self.assertEqual(page.request.urls, [])
 
 

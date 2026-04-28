@@ -19,6 +19,12 @@ except ModuleNotFoundError:
         pass
 
 from src.affordablehousing_agent.config import PROJECT_ROOT, load_selectors
+from src.affordablehousing_agent.detail import (
+    enrich_record_with_detail,
+    extract_detail_data,
+    is_allowed_detail_url,
+    parse_server_side_variables,
+)
 from src.affordablehousing_agent.extractor import (
     _is_useful_href,
     _model_detail_url_from_card,
@@ -33,6 +39,18 @@ from src.affordablehousing_agent.storage import write_csv, write_jsonl
 
 DETAIL_URL_RE = re.compile(r"^https://www\.affordablehousing\.com/[a-z0-9-]+/[a-z0-9-]+-\d+/$")
 LIVE_RESULTS_URL = "https://www.affordablehousing.com/boston-ma/apartment/"
+DETAIL_HTML = """
+<html>
+  <script>
+    propertyDetailsModel.domain.serverSideVariables.propertyCity("Boston");
+    propertyDetailsModel.domain.serverSideVariables.propertyState("MA");
+    propertyDetailsModel.domain.serverSideVariables.propertyLatitude("42.347234");
+    propertyDetailsModel.domain.serverSideVariables.propertyLongitude("-71.062665");
+    propertyDetailsModel.domain.serverSideVariables.propertyAddress("288 Harrison Ave");
+    propertyDetailsModel.domain.serverSideVariables.communityName("Pok Oi Residences");
+  </script>
+</html>
+"""
 
 
 class FakeCard:
@@ -57,13 +75,39 @@ class FakePage:
         return self.property_list[index]
 
 
+class FakeResponse:
+    def __init__(self, text: str, ok: bool = True, status: int = 200) -> None:
+        self._text = text
+        self.ok = ok
+        self.status = status
+
+    def text(self) -> str:
+        return self._text
+
+
+class FakeRequest:
+    def __init__(self, response: FakeResponse) -> None:
+        self.response = response
+        self.urls: list[str] = []
+
+    def get(self, url: str) -> FakeResponse:
+        self.urls.append(url)
+        return self.response
+
+
+class FakePageWithRequest:
+    def __init__(self, response: FakeResponse) -> None:
+        self.request = FakeRequest(response)
+
+
 class AffordableHousingSearchUrlTests(unittest.TestCase):
-    def test_location_to_slug_handles_city_county_and_country_suffix(self) -> None:
+    def test_location_to_slug_uses_supported_product_markets(self) -> None:
         self.assertEqual(location_to_slug("Boston, MA, USA"), "boston-ma")
         self.assertEqual(location_to_slug("Boston"), "boston-ma")
         self.assertEqual(location_to_slug("New York City"), "new-york-ny")
-        self.assertEqual(location_to_slug("San Francisco"), "san-francisco-ca")
-        self.assertEqual(location_to_slug("Suffolk County, MA"), "suffolk-county-ma")
+        self.assertEqual(location_to_slug("Washington, DC"), "washington-dc")
+        self.assertEqual(location_to_slug("Philadelphia, PA"), "philadelphia-pa")
+        self.assertEqual(location_to_slug("University City"), "philadelphia-pa")
 
     def test_location_to_slug_rejects_empty_and_url_values(self) -> None:
         with self.assertRaises(ValueError):
@@ -71,6 +115,12 @@ class AffordableHousingSearchUrlTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             location_to_slug("https://www.affordablehousing.com/boston-ma/")
+
+        with self.assertRaises(ValueError):
+            location_to_slug("San Francisco, CA")
+
+        with self.assertRaises(ValueError):
+            location_to_slug("Suffolk County, MA")
 
     def test_build_search_url_orders_seo_filters(self) -> None:
         url = build_affordablehousing_search_url(
@@ -220,6 +270,68 @@ class AffordableHousingExtractorHelperTests(unittest.TestCase):
             ),
             "",
         )
+
+
+class AffordableHousingDetailTests(unittest.TestCase):
+    def test_allowed_detail_url_requires_https_affordablehousing_detail_page(self) -> None:
+        self.assertTrue(
+            is_allowed_detail_url("https://www.affordablehousing.com/boston-ma/pok-oi-residences-963727/")
+        )
+        self.assertFalse(is_allowed_detail_url("http://www.affordablehousing.com/boston-ma/pok-oi-residences-963727/"))
+        self.assertFalse(is_allowed_detail_url("https://evil.example/boston-ma/pok-oi-residences-963727/"))
+        self.assertFalse(is_allowed_detail_url("javascript:https://www.affordablehousing.com/boston-ma/a-1/"))
+        self.assertFalse(is_allowed_detail_url("https://www.affordablehousing.com/boston-ma/apartment/"))
+
+    def test_extract_detail_data_reads_server_side_coordinates(self) -> None:
+        variables = parse_server_side_variables(DETAIL_HTML)
+        data = extract_detail_data(DETAIL_HTML)
+
+        self.assertEqual(variables["propertyCity"], "Boston")
+        self.assertEqual(data["detail_name"], "Pok Oi Residences")
+        self.assertEqual(data["listing_address"], "288 Harrison Ave, Boston, MA")
+        self.assertEqual(data["listing_latitude"], 42.347234)
+        self.assertEqual(data["listing_longitude"], -71.062665)
+        self.assertEqual(data["listing_location_source"], "server_side_variables")
+
+    def test_enrich_record_with_detail_merges_coordinates_and_writes_debug_json(self) -> None:
+        page = FakePageWithRequest(FakeResponse(DETAIL_HTML))
+        record = {
+            "id": "963727",
+            "url": "https://www.affordablehousing.com/boston-ma/pok-oi-residences-963727/",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            enriched = enrich_record_with_detail(
+                page=page,
+                record=record,
+                debug_dir=Path(tmpdir),
+            )
+            debug_path = Path(enriched["listing_detail_debug_file"])
+            self.assertTrue(debug_path.exists())
+
+        self.assertEqual(enriched["listing_detail_status"], "ok")
+        self.assertEqual(enriched["coordinates_status"], "present")
+        self.assertEqual(enriched["coordinates_source"], "server_side_variables")
+        self.assertEqual(enriched["listing_latitude"], 42.347234)
+        self.assertEqual(
+            page.request.urls,
+            ["https://www.affordablehousing.com/boston-ma/pok-oi-residences-963727/"],
+        )
+
+    def test_enrich_record_with_detail_marks_missing_failed_and_invalid_coordinates(self) -> None:
+        invalid = {"url": "https://evil.example/boston-ma/pok-oi-residences-963727/"}
+        invalid_page = FakePageWithRequest(FakeResponse(DETAIL_HTML))
+
+        enrich_record_with_detail(page=invalid_page, record=invalid)
+        self.assertEqual(invalid["listing_detail_status"], "skipped_invalid_detail_url")
+        self.assertEqual(invalid["coordinates_status"], "missing")
+        self.assertEqual(invalid_page.request.urls, [])
+
+        failed = {"url": "https://www.affordablehousing.com/boston-ma/pok-oi-residences-963727/"}
+        enrich_record_with_detail(page=FakePageWithRequest(FakeResponse("nope", ok=False, status=503)), record=failed)
+        self.assertEqual(failed["listing_detail_status"], "failed")
+        self.assertEqual(failed["coordinates_status"], "failed")
+        self.assertIn("503", failed["coordinates_error"])
 
 
 class AffordableHousingStorageTests(unittest.TestCase):
