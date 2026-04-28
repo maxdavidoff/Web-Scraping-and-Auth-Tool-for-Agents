@@ -14,22 +14,6 @@ from src.rentalsource_agent.search_url import build_rentalsource_search_url
 from src.rentalsource_agent.storage import write_csv, write_jsonl
 
 
-def try_automated_search(page, location: str, selectors: dict) -> bool:
-    search_input_selectors = selectors.get("search_input_selectors", [])
-    for selector in search_input_selectors:
-        try:
-            loc = page.locator(selector).first
-            if loc.count() == 0:
-                continue
-            loc.click(timeout=2_000)
-            loc.fill(location, timeout=3_000)
-            loc.press("Enter", timeout=3_000)
-            return True
-        except Exception:
-            continue
-    return False
-
-
 def scroll_for_results(page, scrolls: int, pause_ms: int) -> None:
     for _ in range(max(scrolls, 0)):
         page.mouse.wheel(0, 2200)
@@ -71,11 +55,6 @@ def main() -> None:
         "--fetch-listing-api",
         action="store_true",
         help="Compatibility alias for --fetch-listing-detail.",
-    )
-    parser.add_argument(
-        "--capture-detail-urls",
-        action="store_true",
-        help="Accepted for Ohana CLI parity; RentalSource result cards already include detail URLs.",
     )
     parser.add_argument(
         "--save-detail-debug",
@@ -162,25 +141,12 @@ def main() -> None:
             print("When the results are visible, return here and press ENTER.")
             input("Press ENTER to extract visible results... ")
         else:
-            if args.search_url or args.location:
-                print("Using RentalSource URL directly; skipping automated search input.")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8_000)
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(2_000)
-            else:
-                print(f"Trying automated search for: {settings.location}")
-                ok = try_automated_search(page, settings.location, selectors)
-                if not ok:
-                    print("Could not find a search input with the current selectors.")
-                    print("Run again with --manual-search or edit selectors.rentalsource.json.")
-                    input("Run the search manually now, then press ENTER to extract visible results... ")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=8_000)
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(2_000)
+            print("Using RentalSource URL directly; skipping automated search input.")
+            try:
+                page.wait_for_load_state("networkidle", timeout=8_000)
+            except PlaywrightTimeoutError:
+                pass
+            page.wait_for_timeout(2_000)
 
         scroll_for_results(page, args.scrolls, pause_ms=1_000)
         debug = save_debug_artifacts(page, DEBUG_DIR)
@@ -189,7 +155,6 @@ def main() -> None:
             page,
             selectors,
             max_listings=args.max_listings,
-            capture_detail_urls=False,
         )
 
         if args.fetch_listing_detail or args.fetch_listing_api:

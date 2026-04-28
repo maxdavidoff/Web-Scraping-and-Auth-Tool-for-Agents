@@ -155,7 +155,6 @@ def extract_listings(
     selectors: dict[str, Any],
     *,
     max_listings: int = 25,
-    capture_detail_urls: bool = False,
 ) -> list[dict]:
     result_card_selectors = selectors.get("result_card_selectors", [])
     detail_link_selectors = selectors.get("detail_link_selectors", ["a[href*='/details/']"])
