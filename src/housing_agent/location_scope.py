@@ -28,15 +28,12 @@ NEIGHBORHOOD_ONLY_LOCATIONS = frozenset(
         "upper east side",
         "upper west side",
         "williamsburg",
-        "haight ashbury",
-        "mission",
-        "mission district",
-        "nob hill",
-        "north beach",
-        "richmond",
-        "soma",
-        "south of market",
-        "sunset",
+        "capitol hill",
+        "dupont circle",
+        "georgetown",
+        "georgetown dc",
+        "university city",
+        "university city pa",
     }
 )
 

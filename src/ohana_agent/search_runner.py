@@ -132,6 +132,26 @@ def _fetch_listing_api_data(page, records: list[dict[str, Any]]) -> None:
         page.wait_for_timeout(500)
 
 
+def _annotate_coordinate_status(record: dict[str, Any], *, enrichment_requested: bool) -> None:
+    if record.get("listing_latitude") is not None and record.get("listing_longitude") is not None:
+        record["coordinates_status"] = "present"
+        record["coordinates_source"] = record.get("listing_location_source") or "ohana_init_data"
+        return
+
+    record["coordinates_source"] = "ohana_init_data"
+    if not enrichment_requested:
+        record["coordinates_status"] = "not_requested"
+        return
+
+    if record.get("listing_api_status") == "failed":
+        record["coordinates_status"] = "failed"
+        if record.get("listing_api_error"):
+            record["coordinates_error"] = record["listing_api_error"]
+        return
+
+    record["coordinates_status"] = "missing"
+
+
 def run_ohana_search(options: OhanaSearchOptions) -> OhanaSearchResult:
     ensure_dirs()
     search_url = build_search_url(options)
@@ -201,6 +221,9 @@ def run_ohana_search(options: OhanaSearchOptions) -> OhanaSearchResult:
 
         if options.fetch_listing_api:
             _fetch_listing_api_data(page, records)
+
+        for record in records:
+            _annotate_coordinate_status(record, enrichment_requested=options.fetch_listing_api)
 
         jsonl_count = write_jsonl(records, raw_output)
         csv_count = write_csv(records, csv_output)

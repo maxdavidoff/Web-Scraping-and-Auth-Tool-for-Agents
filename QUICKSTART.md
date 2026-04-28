@@ -11,6 +11,8 @@ python -m playwright install chromium
 Run the automated tests. Live browser scrape tests are skipped unless you set
 `RUN_LIVE_SCRAPE_TESTS=1`:
 
+Supported search markets are Boston, MA; New York, NY; Washington, DC; and Philadelphia, PA. Known neighborhoods inside those markets, such as University City for Philadelphia, are mapped back to the supported city search.
+
 ```bash
 python3 -m unittest discover -s tests -v
 ```
@@ -102,6 +104,7 @@ AffordableHousing.com:
 ```bash
 python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
 python run_affordablehousing_search.py --search-url "https://www.affordablehousing.com/boston-ma/" --manual-search --max-listings 20 --keep-open
+python run_affordablehousing_search.py --location "Boston, MA" --max-listings 10 --fetch-listing-detail
 ```
 
 RentalSource:
@@ -116,3 +119,5 @@ Optional RentalSource detail enrichment:
 ```bash
 python run_rentalsource_search.py --location "Boston, MA" --max-listings 10 --fetch-listing-detail
 ```
+
+Coordinate fields are explicit in provider outputs. Look for `coordinates_status`, `coordinates_source`, `listing_latitude`, and `listing_longitude`. Ohana needs `--fetch-listing-api` and real listing URLs for coordinates; RentalSource and AffordableHousing use detail-page enrichment.

@@ -69,6 +69,8 @@ class HousingProviderRoutingTests(unittest.TestCase):
 
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0]["provider"], "ohana")
+        self.assertEqual(result.records[0]["coordinates_status"], "not_requested")
+        self.assertEqual(result.records[0]["coordinates_source"], "ohana_init_data")
         self.assertEqual(result.provider_results[0].status, "ok")
         run_ohana.assert_called_once()
 
@@ -84,6 +86,9 @@ class HousingProviderRoutingTests(unittest.TestCase):
                             "source": "rentalsource",
                             "title": "Market apartment",
                             "url": "https://www.rentalsource.com/details/1/",
+                            "listing_latitude": 42.3,
+                            "listing_longitude": -71.0,
+                            "listing_location_source": "detail_json_ld",
                         }
                     ],
                     tmpdir,
@@ -93,6 +98,8 @@ class HousingProviderRoutingTests(unittest.TestCase):
 
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0]["provider"], "rentalsource")
+        self.assertEqual(result.records[0]["coordinates_status"], "present")
+        self.assertEqual(result.records[0]["coordinates_source"], "detail_json_ld")
         self.assertEqual(result.provider_results[0].provider, "rentalsource")
         run_rentalsource.assert_called_once()
 
@@ -155,6 +162,7 @@ class HousingProviderRoutingTests(unittest.TestCase):
                             "source": "affordablehousing",
                             "title": "Affordable apartment",
                             "url": "https://www.affordablehousing.com/boston-ma/a-1/",
+                            "listing_detail_status": "ok_no_detail_coordinates",
                         }
                     ],
                     tmpdir,
@@ -164,8 +172,26 @@ class HousingProviderRoutingTests(unittest.TestCase):
 
         self.assertEqual(len(result.records), 1)
         self.assertEqual(result.records[0]["provider"], "affordablehousing")
+        self.assertEqual(result.records[0]["coordinates_status"], "missing")
+        self.assertEqual(result.records[0]["coordinates_source"], "server_side_variables")
         self.assertEqual(result.provider_results[0].status, "ok")
         run_affordable.assert_called_once()
+
+    def test_fetch_listing_api_enables_affordablehousing_detail_enrichment(self) -> None:
+        plan = make_plan(providers=["affordablehousing"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                run_affordable.return_value = fake_result("affordablehousing", [], tmpdir)
+
+                run_provider_searches(
+                    plan,
+                    providers=plan.providers,
+                    fetch_listing_api=True,
+                )
+
+        options = run_affordable.call_args.args[0]
+        self.assertTrue(options.fetch_listing_detail)
 
     def test_affordablehousing_report_does_not_mark_min_price_source_applied(self) -> None:
         plan = make_plan(

@@ -207,15 +207,18 @@ def enrich_record_with_detail(
     detail_url = record.get("detail_url") or record.get("url")
     if not detail_url:
         record["listing_detail_status"] = "skipped_no_detail_url"
+        annotate_coordinate_status(record, enrichment_requested=True)
         return record
     if not is_allowed_detail_url(str(detail_url)):
         record["listing_detail_status"] = "skipped_invalid_detail_url"
+        annotate_coordinate_status(record, enrichment_requested=True)
         return record
 
     try:
         detail_data = fetch_listing_detail_data(page, str(detail_url))
         if not detail_data:
             record["listing_detail_status"] = "ok_no_real_estate_listing_json_ld"
+            annotate_coordinate_status(record, enrichment_requested=True)
             return record
 
         existing_images = record.get("image_urls")
@@ -226,6 +229,7 @@ def enrich_record_with_detail(
 
         record.update(detail_data)
         record["listing_detail_status"] = "ok"
+        annotate_coordinate_status(record, enrichment_requested=True)
 
         if debug_dir:
             debug_dir.mkdir(parents=True, exist_ok=True)
@@ -240,5 +244,26 @@ def enrich_record_with_detail(
     except Exception as e:
         record["listing_detail_status"] = "failed"
         record["listing_detail_error"] = str(e)
+        annotate_coordinate_status(record, enrichment_requested=True)
 
     return record
+
+
+def annotate_coordinate_status(record: dict, *, enrichment_requested: bool) -> None:
+    if record.get("listing_latitude") is not None and record.get("listing_longitude") is not None:
+        record["coordinates_status"] = "present"
+        record["coordinates_source"] = record.get("listing_location_source") or "detail_json_ld"
+        return
+
+    record["coordinates_source"] = "detail_json_ld"
+    if not enrichment_requested:
+        record["coordinates_status"] = "not_requested"
+        return
+
+    if record.get("listing_detail_status") == "failed":
+        record["coordinates_status"] = "failed"
+        if record.get("listing_detail_error"):
+            record["coordinates_error"] = record["listing_detail_error"]
+        return
+
+    record["coordinates_status"] = "missing"

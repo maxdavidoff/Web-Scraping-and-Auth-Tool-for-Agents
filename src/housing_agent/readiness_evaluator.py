@@ -251,17 +251,6 @@ def apply_readiness_guards(
     )
 
 
-def _intent_kind(intent: HousingSearchIntent) -> str:
-    text = _intent_text(intent)
-    if intent.section8 or intent.income_restricted or "voucher" in text or "section 8" in text or "section8" in text:
-        return "affordable"
-    if intent.intent_kind in {"affordable", "student_sublet", "general_rental", "apartment"}:
-        return intent.intent_kind
-    if intent.type_of_places or "sublet" in text or "student" in text or "campus" in text:
-        return "student_sublet"
-    return "general_rental"
-
-
 def _has_provider_routing_signal(intent: HousingSearchIntent) -> bool:
     text = _intent_text(intent)
     if intent.intent_kind and intent.intent_kind != "unknown":
@@ -308,20 +297,6 @@ def _has_provider_routing_signal(intent: HousingSearchIntent) -> bool:
     return any(signal in text for signal in signals)
 
 
-def _has_affordability_signal(intent: HousingSearchIntent) -> bool:
-    text = _intent_text(intent)
-    return bool(
-        intent.section8
-        or intent.income_restricted
-        or intent.max_price is not None
-        or "voucher" in text
-        or "section 8" in text
-        or "section8" in text
-        or "income restricted" in text
-        or "affordable" in text
-    )
-
-
 def _dedupe_repeated_followups(
     questions: Sequence[str],
     *,
@@ -362,44 +337,6 @@ def _clean_reasoning_summary(summary: str, *, asking_followup: bool) -> str:
     if asking_followup and "all required fields" in text.lower():
         return "One more detail would make this search more useful."
     return text
-
-
-def _has_timing_signal(intent: HousingSearchIntent) -> bool:
-    text = _intent_text(intent)
-    timing_terms = (
-        "asap",
-        "flexible",
-        "browse",
-        "browsing",
-        "summer",
-        "fall",
-        "spring",
-        "semester",
-        "month",
-        "lease",
-        "move",
-    )
-    return bool(intent.move_in_date or intent.move_out_date or intent.lease_length or any(term in text for term in timing_terms))
-
-
-def _broad_search_requested(transcript: Sequence[Mapping[str, str]] | None) -> bool:
-    if not transcript:
-        return False
-    latest = str(transcript[-1].get("content", "")).lower()
-    cues = (
-        "just browsing",
-        "browsing generally",
-        "show me options",
-        "show options",
-        "broad search",
-        "search anyway",
-        "i'm flexible",
-        "im flexible",
-        "flexible",
-        "anything",
-        "any place",
-    )
-    return any(cue in latest for cue in cues)
 
 
 def _intent_text(intent: HousingSearchIntent) -> str:

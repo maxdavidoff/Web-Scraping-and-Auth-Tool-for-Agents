@@ -42,6 +42,8 @@ def write_csv(records: list[dict], path: str | Path) -> int:
         "listing_address",
         "listing_latitude",
         "listing_longitude",
+        "coordinates_status",
+        "coordinates_source",
         "url",
         "image_urls",
         "scraped_at",

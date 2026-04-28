@@ -9,7 +9,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser import build_context, save_storage_state
 from .config import DEBUG_DIR, PROCESSED_DIR, RAW_DIR, ensure_dirs, get_settings, load_selectors
-from .detail import enrich_record_with_detail
+from .detail import annotate_coordinate_status, enrich_record_with_detail
 from .extractor import extract_listings, save_debug_artifacts
 from .search_url import build_rentalsource_search_url
 from .storage import write_csv, write_jsonl
@@ -136,6 +136,9 @@ def run_rentalsource_search(options: RentalSourceSearchOptions) -> RentalSourceS
                 print(f"[{i}/{len(records)}] {record.get('title', 'Untitled listing')}")
                 enrich_record_with_detail(page=page, record=record, debug_dir=detail_debug_dir)
                 page.wait_for_timeout(500)
+        else:
+            for record in records:
+                annotate_coordinate_status(record, enrichment_requested=False)
 
         jsonl_count = write_jsonl(records, raw_output)
         csv_count = write_csv(records, csv_output)
