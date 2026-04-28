@@ -49,6 +49,26 @@ def fake_router_result(records: list[dict] | None = None, errors: dict[str, str]
     return SimpleNamespace(provider_results=provider_results, records=records, errors=errors)
 
 
+def fake_metric_router_result():
+    return fake_router_result(
+        [
+            {
+                "provider": "rentalsource",
+                "title": "Close apartment",
+                "price": "$1,700",
+                "address": "Boston, MA",
+                "url": "https://example.com/close",
+            },
+            {
+                "provider": "rentalsource",
+                "title": "Cheaper apartment",
+                "price": "$1,400",
+                "url": "https://example.com/cheap",
+            },
+        ]
+    )
+
+
 def ready_readiness(intent, **kwargs):
     return SearchReadiness(
         ready_to_search=True,
@@ -395,6 +415,39 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_listings"], 5)
         self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource",))
+
+    def test_execution_result_includes_decision_metrics_and_result_tools(self) -> None:
+        runner = Mock(return_value=fake_metric_router_result())
+        agent = InteractiveHousingAgent(
+            client=FakeJsonClient(
+                [
+                    {
+                        "location": "Boston, MA",
+                        "max_price": 1800,
+                        "property_types": ["Apartment"],
+                        "campus_or_school": "Northeastern",
+                        "intent_kind": "general_rental",
+                    }
+                ]
+            ),
+            runner=runner,
+            readiness_evaluator=ready_readiness,
+            listing_ranker=fake_listing_ranker,
+        )
+
+        confirmation = agent.handle_user_message("I need an apartment near Northeastern under 1800")
+        execution = agent.handle_user_message("yes")
+        cheaper = agent.handle_user_message("cheaper")
+        why = agent.handle_user_message("why 1")
+        compare = agent.handle_user_message("compare 1 2")
+        map_turn = agent.handle_user_message("show map")
+
+        self.assertEqual(confirmation.state, "execution_confirmation_requested")
+        self.assertIn("Decision metrics:", execution.message)
+        self.assertIn("Sorted by visible price", cheaper.message)
+        self.assertIn("Scores:", why.message)
+        self.assertIn("Comparison", compare.message)
+        self.assertIn("Map", map_turn.message)
 
     def test_execute_command_repeats_agent_led_confirmation(self) -> None:
         runner = Mock(return_value=fake_router_result())

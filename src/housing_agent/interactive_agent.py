@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any, Callable, Mapping, Sequence
@@ -8,6 +9,16 @@ from typing import Any, Callable, Mapping, Sequence
 from src.ohana_agent.provider_router import run_provider_searches
 
 from .intent_extractor import JsonChatClient, update_housing_intent
+from .listing_evaluator import (
+    EvaluatedListing,
+    ListingDecisionSet,
+    compare_listings,
+    evaluate_listings,
+    filter_under_price,
+    hide_missing_address,
+    listing_explanation,
+    sort_listings,
+)
 from .listing_ranker import rank_listings
 from .provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
 from .readiness_evaluator import evaluate_search_readiness
@@ -38,6 +49,15 @@ Debug commands:
   json                     Show debug JSON for the current state.
   transcript               Show this session's user transcript.
   max-listings <n>, max <n> Set max listings per provider.
+
+After results:
+  compare 1 2              Compare listings by number.
+  why 1                    Explain one listing's metrics.
+  cheaper                  Sort by lowest visible price.
+  closer                   Sort by distance to campus/target when available.
+  only under <price>       Keep listings with visible rent under a price.
+  hide missing address     Hide listings without address data.
+  show map                 Show the generated map artifact path.
 """.strip()
 
 
@@ -94,6 +114,8 @@ class InteractiveHousingAgent:
         self.latest_planning_payload: dict[str, Any] | None = None
         self.latest_execution_result: Any | None = None
         self.latest_listing_ranking: ListingRankingResult | None = None
+        self.latest_listing_decisions: ListingDecisionSet | None = None
+        self.visible_listing_decisions: tuple[EvaluatedListing, ...] = ()
         self.latest_ranking_error: str = ""
         self.pending_execution_confirmation = False
         self.proposed_execution_providers: tuple[str, ...] = ()
@@ -117,6 +139,8 @@ class InteractiveHousingAgent:
         self.proposed_execution_providers = ()
         self.latest_execution_result = None
         self.latest_listing_ranking = None
+        self.latest_listing_decisions = None
+        self.visible_listing_decisions = ()
         self.latest_ranking_error = ""
         previous_transcript = list(self.transcript)
         self.transcript.append({"role": "user", "content": message})
@@ -182,6 +206,8 @@ class InteractiveHousingAgent:
         self.latest_planning_payload = None
         self.latest_execution_result = None
         self.latest_listing_ranking = None
+        self.latest_listing_decisions = None
+        self.visible_listing_decisions = ()
         self.latest_ranking_error = ""
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
@@ -202,6 +228,8 @@ class InteractiveHousingAgent:
             "max_listings": self.max_listings,
             "execution_result": self._execution_payload(self.latest_execution_result),
             "listing_ranking": _to_jsonable(self.latest_listing_ranking),
+            "listing_decisions": self.latest_listing_decisions.as_dict() if self.latest_listing_decisions else None,
+            "visible_listing_decisions": _to_jsonable(self.visible_listing_decisions),
             "ranking_error": self.latest_ranking_error,
             "transcript": list(self.transcript),
         }
@@ -302,6 +330,14 @@ class InteractiveHousingAgent:
                 suffix = f" — {error}" if error else ""
                 lines.append(f"- {provider}: {status}, {count} listing(s){suffix}")
 
+        if self.visible_listing_decisions:
+            lines.extend(["", "Decision metrics:"])
+            lines.extend(_decision_listing_line(item) for item in self.visible_listing_decisions[:5])
+            if self.latest_listing_decisions and self.latest_listing_decisions.map_path:
+                lines.append(f"Map: {self.latest_listing_decisions.map_path}")
+            elif self.latest_listing_decisions:
+                lines.append("Map: unavailable until listing coordinates are present.")
+
         if self.latest_listing_ranking:
             ranking = self.latest_listing_ranking
             if ranking.overall_summary:
@@ -393,6 +429,9 @@ class InteractiveHousingAgent:
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
+        result_command = self._handle_result_command(lower)
+        if result_command is not None:
+            return result_command
         max_listings = _parse_max_listings_command(lower)
         if max_listings is not None:
             if max_listings <= 0:
@@ -416,6 +455,60 @@ class InteractiveHousingAgent:
                 json_payload=self.current_state_payload(),
             )
         return None
+
+    def _handle_result_command(self, lower: str) -> AgentTurn | None:
+        if lower.startswith("compare "):
+            indexes = _parse_indexes(lower)
+            return self._result_command_turn(compare_listings(self.visible_listing_decisions, indexes))
+        if lower.startswith("why "):
+            indexes = _parse_indexes(lower)
+            index = indexes[0] if indexes else 0
+            return self._result_command_turn(listing_explanation(self.visible_listing_decisions, index))
+        if lower in {"cheaper", "rerank by price", "sort by price"}:
+            self.visible_listing_decisions = sort_listings(self.visible_listing_decisions, "price")
+            return self._result_command_turn(_render_decision_list(self.visible_listing_decisions, "Sorted by visible price."))
+        if lower in {"closer", "rerank by location", "sort by location"}:
+            self.visible_listing_decisions = sort_listings(self.visible_listing_decisions, "location")
+            return self._result_command_turn(_render_decision_list(self.visible_listing_decisions, "Sorted by distance to target."))
+        if lower.startswith("only under "):
+            max_price = _parse_price_from_text(lower)
+            if max_price is None:
+                return self._result_command_turn("Tell me the price cap, for example `only under 1800`.")
+            self.visible_listing_decisions = filter_under_price(self.visible_listing_decisions, max_price)
+            return self._result_command_turn(
+                _render_decision_list(self.visible_listing_decisions, f"Showing listings with visible rent under ${max_price:,}.")
+            )
+        if lower == "hide missing address":
+            self.visible_listing_decisions = hide_missing_address(self.visible_listing_decisions)
+            return self._result_command_turn(_render_decision_list(self.visible_listing_decisions, "Hid listings without address data."))
+        if lower == "show map":
+            if not self.latest_listing_decisions:
+                return None
+            if self.latest_listing_decisions.map_path:
+                return self._result_command_turn(f"Map artifact: {self.latest_listing_decisions.map_path}")
+            return self._result_command_turn("Map unavailable until listing coordinates are present.")
+        return None
+
+    def _result_command_turn(self, message: str) -> AgentTurn:
+        if not self.latest_execution_result:
+            return AgentTurn(
+                state="blocked",
+                message="No results are available yet. Run a search before using result tools.",
+                intent=self.current_intent,
+                search_readiness=self.latest_readiness,
+                query_plan=self.latest_plan,
+                json_payload=self.current_state_payload(),
+            )
+        return AgentTurn(
+            state="executed",
+            message=message,
+            intent=self.current_intent,
+            search_readiness=self.latest_readiness,
+            query_plan=self.latest_plan,
+            execution_result=self.latest_execution_result,
+            listing_ranking=self.latest_listing_ranking,
+            json_payload=self.current_state_payload(),
+        )
 
     def _plan_command(self) -> AgentTurn:
         if not self.current_intent:
@@ -547,8 +640,12 @@ class InteractiveHousingAgent:
 
         records = list(getattr(result, "records", []) or [])
         self.latest_listing_ranking = None
+        self.latest_listing_decisions = None
+        self.visible_listing_decisions = ()
         self.latest_ranking_error = ""
         if records:
+            self.latest_listing_decisions = evaluate_listings(self.current_intent, records)
+            self.visible_listing_decisions = self.latest_listing_decisions.listings
             try:
                 self.latest_listing_ranking = self.listing_ranker(
                     self.current_intent,
@@ -868,6 +965,44 @@ def _ranked_listing_line(listing: Any) -> str:
     if url:
         suffixes.append(url)
     return f"{title} ({'; '.join(suffixes)})"
+
+
+def _decision_listing_line(listing: EvaluatedListing) -> str:
+    price = listing.price_text or "price unknown"
+    distance = (
+        f"{listing.distance_to_target_miles:.1f} mi"
+        if listing.distance_to_target_miles is not None
+        else "location unknown"
+    )
+    missing = f"; missing {', '.join(listing.missing[:2])}" if listing.missing else ""
+    concerns = f"; concerns {', '.join(listing.concerns[:2])}" if listing.concerns else ""
+    return (
+        f"{listing.index}. {listing.title} — {price} — {listing.metrics.overall:g}/100 "
+        f"(price {listing.metrics.price:g}, location {listing.metrics.location:g}, "
+        f"type {listing.metrics.housing_type:g}; {distance}){missing}{concerns}"
+    )
+
+
+def _render_decision_list(listings: Sequence[EvaluatedListing], heading: str) -> str:
+    if not listings:
+        return f"{heading}\n\nNo listings match that view."
+    lines = [heading, ""]
+    lines.extend(_decision_listing_line(item) for item in listings[:10])
+    return "\n".join(lines)
+
+
+def _parse_indexes(text: str) -> tuple[int, ...]:
+    return tuple(int(match) for match in re.findall(r"\b\d+\b", text))
+
+
+def _parse_price_from_text(text: str) -> int | None:
+    matches = re.findall(r"\b\d[\d,]*\b", text)
+    if not matches:
+        return None
+    try:
+        return int(matches[-1].replace(",", ""))
+    except ValueError:
+        return None
 
 
 def _why_line(reasons: Sequence[str]) -> str:
