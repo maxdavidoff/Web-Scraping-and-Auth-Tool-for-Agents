@@ -18,6 +18,19 @@ PROPERTY_TYPE_SLUGS = {
     "condos": "condo",
 }
 
+CANONICAL_CITY_STATE_SLUGS = {
+    "boston": "boston-ma",
+    "new york": "new-york-ny",
+    "new york city": "new-york-ny",
+    "nyc": "new-york-ny",
+    "san francisco": "san-francisco-ca",
+    "sf": "san-francisco-ca",
+    "philadelphia": "philadelphia-pa",
+    "philly": "philadelphia-pa",
+    "washington dc": "washington-dc",
+    "washington d c": "washington-dc",
+}
+
 
 def _slugify(text: str) -> str:
     text = text.lower().strip()
@@ -25,6 +38,13 @@ def _slugify(text: str) -> str:
     text = re.sub(r"[^a-z0-9]+", "-", text)
     text = re.sub(r"-+", "-", text)
     return text.strip("-")
+
+
+def _location_key(location: str) -> str:
+    text = location.lower().strip()
+    text = re.sub(r"\b(?:usa|us|united states|united states of america)\b", "", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def location_to_slug(location: str) -> str:
@@ -49,6 +69,10 @@ def location_to_slug(location: str) -> str:
 
     if len(parts) >= 2:
         return _slugify(f"{parts[0]} {parts[1]}")
+
+    key = _location_key(location)
+    if key in CANONICAL_CITY_STATE_SLUGS:
+        return CANONICAL_CITY_STATE_SLUGS[key]
 
     return _slugify(location)
 

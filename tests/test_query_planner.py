@@ -65,6 +65,52 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertIn("bathrooms", ohana.report.unknown_unverified)
         self.assertIn("sort", ohana.report.unknown_unverified)
 
+    def test_multiple_roommates_rank_rentalsource_even_for_student_context(self) -> None:
+        intent = HousingSearchIntent(
+            location="Boston, MA",
+            max_price=4200,
+            furnished=True,
+            roommate_count=3,
+            intent_kind="student_sublet",
+            notes=("My roommates and I need a full rental.",),
+        )
+
+        plan = plan_query(intent)
+
+        self.assertEqual(plan.ranked_provider_names[0], RENTALSOURCE)
+        self.assertGreater(plan.for_provider(RENTALSOURCE).score, plan.for_provider(OHANA).score)
+
+    def test_single_person_room_search_ranks_ohana(self) -> None:
+        intent = HousingSearchIntent(
+            location="Boston, MA",
+            max_price=1800,
+            furnished=True,
+            roommate_count=0,
+            notes=("Just me looking for a place.",),
+        )
+
+        plan = plan_query(intent)
+
+        self.assertEqual(plan.ranked_provider_names[0], OHANA)
+        self.assertGreater(plan.for_provider(OHANA).score, plan.for_provider(RENTALSOURCE).score)
+
+    def test_affordable_conditions_outrank_multiple_roommates(self) -> None:
+        intent = HousingSearchIntent(
+            location="Boston, MA",
+            max_price=2600,
+            property_types=("Apartment",),
+            roommate_count=3,
+            section8=True,
+            income_restricted=True,
+            intent_kind="affordable",
+            notes=("Voucher holder searching with roommates.",),
+        )
+
+        plan = plan_query(intent)
+
+        self.assertEqual(plan.ranked_provider_names[0], AFFORDABLEHOUSING)
+        self.assertGreater(plan.for_provider(AFFORDABLEHOUSING).score, plan.for_provider(RENTALSOURCE).score)
+
     def test_section8_intent_ranks_affordablehousing_and_warns_on_min_price(self) -> None:
         intent = HousingSearchIntent(
             location="Boston, MA",
