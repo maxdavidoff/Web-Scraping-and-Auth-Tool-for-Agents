@@ -60,6 +60,9 @@ class FakePage:
 class AffordableHousingSearchUrlTests(unittest.TestCase):
     def test_location_to_slug_handles_city_county_and_country_suffix(self) -> None:
         self.assertEqual(location_to_slug("Boston, MA, USA"), "boston-ma")
+        self.assertEqual(location_to_slug("Boston"), "boston-ma")
+        self.assertEqual(location_to_slug("New York City"), "new-york-ny")
+        self.assertEqual(location_to_slug("San Francisco"), "san-francisco-ca")
         self.assertEqual(location_to_slug("Suffolk County, MA"), "suffolk-county-ma")
 
     def test_location_to_slug_rejects_empty_and_url_values(self) -> None:
@@ -82,6 +85,19 @@ class AffordableHousingSearchUrlTests(unittest.TestCase):
         self.assertEqual(
             url,
             "https://www.affordablehousing.com/boston-ma/under-1500/1-bed/apartment/pet-friendly/utilities-included/",
+        )
+
+    def test_build_search_url_uses_city_state_slug_for_city_only_location(self) -> None:
+        url = build_affordablehousing_search_url(
+            "Boston",
+            property_types=["Apartment"],
+            num_bedrooms=2,
+            max_price=1500,
+        )
+
+        self.assertEqual(
+            url,
+            "https://www.affordablehousing.com/boston-ma/under-1500/2-bed/apartment/",
         )
 
     def test_build_search_url_passthroughs_explicit_url(self) -> None:

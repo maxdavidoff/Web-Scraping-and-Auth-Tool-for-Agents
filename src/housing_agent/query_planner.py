@@ -246,8 +246,6 @@ def coerce_intent(value: HousingSearchIntent | Mapping[str, Any] | Any) -> Housi
     normalized = {name: data[name] for name in allowed if name in data}
 
     for tuple_field in (
-        "neighborhoods",
-        "avoid_neighborhoods",
         "property_types",
         "type_of_places",
         "pet_policy",
@@ -312,12 +310,19 @@ def _profile_bonus(intent: HousingSearchIntent, provider: str) -> tuple[float, s
         )
     )
 
+    if provider == OHANA and _wants_multi_roommate_rental(intent):
+        return -4.0, "multi-roommate full-rental fit (-4)"
+
+    if provider == RENTALSOURCE and _wants_multi_roommate_rental(intent):
+        return 6.0, "multiple-roommate rental fit (+6)"
+
     if provider == OHANA and (
         intent.intent_kind == "student_sublet"
         or bool(intent.type_of_places)
+        or _wants_single_room_search(intent)
         or any(term in text for term in sublet_terms)
     ):
-        return 3.0, "student/sublet fit (+3)"
+        return 4.0, "single-room or student/sublet fit (+4)"
 
     if provider == RENTALSOURCE and (
         intent.intent_kind in {"general_rental", "apartment"}
@@ -336,14 +341,50 @@ def _profile_bonus(intent: HousingSearchIntent, provider: str) -> tuple[float, s
     return 0.0, ""
 
 
+def _wants_multi_roommate_rental(intent: HousingSearchIntent) -> bool:
+    text = _intent_text(intent)
+    if intent.roommate_count is not None and intent.roommate_count >= 2:
+        return True
+    cues = (
+        "multiple roommates",
+        "several roommates",
+        "with roommates",
+        "roommates and i",
+        "roommates and me",
+        "my roommates",
+        "group rental",
+        "for our group",
+        "we need",
+        "we are looking",
+    )
+    return any(cue in text for cue in cues)
+
+
+def _wants_single_room_search(intent: HousingSearchIntent) -> bool:
+    text = _intent_text(intent)
+    if intent.roommate_count is not None and intent.roommate_count <= 1:
+        return True
+    cues = (
+        "just me",
+        "only me",
+        "for myself",
+        "by myself",
+        "solo",
+        "single person",
+        "private room",
+        "shared room",
+    )
+    return any(cue in text for cue in cues)
+
+
 def _intent_text(intent: HousingSearchIntent) -> str:
     pieces: list[str] = []
     if intent.intent_kind:
         pieces.append(intent.intent_kind)
+    if intent.roommate_count is not None:
+        pieces.append(f"roommate_count {intent.roommate_count}")
     pieces.extend(intent.notes)
     pieces.extend(intent.flexibility_notes)
-    pieces.extend(intent.neighborhoods)
-    pieces.extend(intent.avoid_neighborhoods)
     pieces.extend(intent.property_types)
     pieces.extend(intent.type_of_places)
     pieces.extend(intent.amenities)

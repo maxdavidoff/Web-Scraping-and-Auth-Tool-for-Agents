@@ -7,36 +7,67 @@ from urllib.parse import quote, urlencode, urlparse
 OHANA_BASE_URL = "https://liveohana.ai"
 OHANA_SUBLET_PATH = "/sublet"
 
-CANONICAL_LOCATION_SLUGS = {
+OHANA_CITY_SLUGS = {
     "boston": "boston",
-    "boston ma": "boston",
-    "new york": "new-york-city",
-    "new york ny": "new-york-city",
-    "new york city": "new-york-city",
-    "new york city ny": "new-york-city",
-    "nyc": "new-york-city",
-    "washington dc": "washington",
-    "washington d c": "washington",
-    "washington district of columbia": "washington",
-    "philadelphia": "philadelphia",
-    "philadelphia pa": "philadelphia",
-    "philly": "philadelphia",
+    "new_york": "new-york-city",
+    "san_francisco": "san-francisco",
 }
 
-CANONICAL_LOCATION_LABELS = {
+OHANA_CITY_LABELS = {
     "boston": "Boston, MA, USA",
-    "boston ma": "Boston, MA, USA",
-    "new york": "New York, NY, USA",
-    "new york ny": "New York, NY, USA",
-    "new york city": "New York, NY, USA",
-    "new york city ny": "New York, NY, USA",
-    "nyc": "New York, NY, USA",
-    "washington dc": "Washington, DC, USA",
-    "washington d c": "Washington, DC, USA",
-    "washington district of columbia": "Washington, DC, USA",
-    "philadelphia": "Philadelphia, PA, USA",
-    "philadelphia pa": "Philadelphia, PA, USA",
-    "philly": "Philadelphia, PA, USA",
+    "new_york": "New York, NY, USA",
+    "san_francisco": "San Francisco, CA, USA",
+}
+
+SUPPORTED_OHANA_CITY_NAMES = tuple(OHANA_CITY_LABELS.values())
+
+OHANA_LOCATION_CITY_ALIASES = {
+    "boston": "boston",
+    "boston ma": "boston",
+    "boston massachusetts": "boston",
+    "cambridge": "boston",
+    "cambridge ma": "boston",
+    "cambridge massachusetts": "boston",
+    "somerville": "boston",
+    "somerville ma": "boston",
+    "brookline": "boston",
+    "brookline ma": "boston",
+    "allston": "boston",
+    "brighton": "boston",
+    "back bay": "boston",
+    "fenway": "boston",
+    "south end": "boston",
+    "new york": "new_york",
+    "new york ny": "new_york",
+    "new york city": "new_york",
+    "new york city ny": "new_york",
+    "nyc": "new_york",
+    "manhattan": "new_york",
+    "brooklyn": "new_york",
+    "queens": "new_york",
+    "bronx": "new_york",
+    "the bronx": "new_york",
+    "staten island": "new_york",
+    "williamsburg": "new_york",
+    "bushwick": "new_york",
+    "harlem": "new_york",
+    "upper west side": "new_york",
+    "upper east side": "new_york",
+    "lower east side": "new_york",
+    "san francisco": "san_francisco",
+    "san francisco ca": "san_francisco",
+    "san francisco california": "san_francisco",
+    "sf": "san_francisco",
+    "s f": "san_francisco",
+    "mission": "san_francisco",
+    "mission district": "san_francisco",
+    "soma": "san_francisco",
+    "south of market": "san_francisco",
+    "nob hill": "san_francisco",
+    "north beach": "san_francisco",
+    "haight ashbury": "san_francisco",
+    "sunset": "san_francisco",
+    "richmond": "san_francisco",
 }
 
 
@@ -58,6 +89,26 @@ def _normalize_location_key(location: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _city_key_for_location(location: str) -> str:
+    key = _normalize_location_key(location)
+    if not key:
+        raise ValueError("Location cannot be empty.")
+
+    city_key = OHANA_LOCATION_CITY_ALIASES.get(key)
+    if city_key:
+        return city_key
+
+    for supported_key in ("new york", "san francisco", "boston"):
+        if re.search(rf"\b{re.escape(supported_key)}\b", key):
+            return OHANA_LOCATION_CITY_ALIASES[supported_key]
+
+    supported = ", ".join(SUPPORTED_OHANA_CITY_NAMES)
+    raise ValueError(
+        f"Ohana URL searches only support {supported}. "
+        "Use one of those cities, or a known neighborhood within one of them."
+    )
+
+
 def slugify_location(location: str) -> str:
     location = location.strip()
     if not location:
@@ -67,30 +118,11 @@ def slugify_location(location: str) -> str:
     if parsed.scheme and parsed.netloc:
         raise ValueError("slugify_location expects a location, not a URL.")
 
-    zip_match = re.search(r"\b\d{5}(?:-\d{4})?\b", location)
-    if zip_match:
-        return zip_match.group(0)
-
-    key = _normalize_location_key(location)
-    if key in CANONICAL_LOCATION_SLUGS:
-        return CANONICAL_LOCATION_SLUGS[key]
-
-    parts = [part.strip() for part in location.split(",") if part.strip()]
-    if len(parts) >= 2 and parts[-1].lower() in {"usa", "us", "united states"}:
-        parts = parts[:-1]
-
-    if len(parts) >= 2 and re.fullmatch(r"[A-Za-z]{2}", parts[1]):
-        key = _normalize_location_key(f"{parts[0]} {parts[1]}")
-        if key in CANONICAL_LOCATION_SLUGS:
-            return CANONICAL_LOCATION_SLUGS[key]
-        return re.sub(r"[^a-z0-9]+", "-", parts[0].lower()).strip("-")
-
-    return re.sub(r"[^a-z0-9]+", "-", key).strip("-")
+    return OHANA_CITY_SLUGS[_city_key_for_location(location)]
 
 
 def format_location_label(location: str) -> str:
-    key = _normalize_location_key(location)
-    return CANONICAL_LOCATION_LABELS.get(key, location.strip())
+    return OHANA_CITY_LABELS[_city_key_for_location(location)]
 
 
 def build_ohana_search_url(

@@ -597,8 +597,10 @@ class InteractiveHousingAgent:
             return None
         if not self.latest_readiness:
             if not self.current_intent.location:
-                return "What city, neighborhood, campus area, or ZIP code should I search in?"
+                return "What larger city or metro area should I search in?"
             return None
+        if self.current_intent.location and not _has_purpose_signal(self.current_intent):
+            return "Is this just for you/private room/student/sublet, a regular rental/full rental with multiple roommates, or affordable/voucher/accessibility housing?"
         if self.latest_readiness.ready_to_search and self.latest_readiness.next_action != "ask_followup":
             return None
         questions = self.latest_readiness.followup_questions
@@ -738,9 +740,13 @@ class InteractiveHousingAgent:
 def _has_purpose_signal(intent: HousingSearchIntent) -> bool:
     if intent.intent_kind and intent.intent_kind != "unknown":
         return True
+    if intent.roommate_count is not None:
+        return True
     if intent.section8 or intent.income_restricted or intent.wheelchair_accessible:
         return True
     if intent.utilities_included or intent.washer_dryer:
+        return True
+    if intent.campus_or_school:
         return True
     if intent.type_of_places:
         return True
@@ -775,8 +781,6 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
     data = _to_jsonable(intent)
     labels = {
         "location": "Location",
-        "neighborhoods": "Neighborhoods",
-        "avoid_neighborhoods": "Avoid neighborhoods",
         "min_price": "Min price",
         "max_price": "Max price",
         "price_basis": "Price basis",

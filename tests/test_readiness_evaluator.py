@@ -61,6 +61,63 @@ class SearchReadinessTests(unittest.TestCase):
         self.assertIn("location", readiness.missing_required_fields)
         self.assertIn("city", readiness.followup_questions[0].lower())
 
+    def test_neighborhood_only_location_asks_for_larger_city(self) -> None:
+        guarded = apply_readiness_guards(
+            readiness_from_mapping(
+                {
+                    "ready_to_search": True,
+                    "ready_to_recommend": False,
+                    "confidence": "medium",
+                    "next_action": "plan_search",
+                }
+            ),
+            HousingSearchIntent(location="Cambridge", type_of_places=("Private room",)),
+            transcript=[{"role": "user", "content": "private room in Cambridge"}],
+        )
+
+        self.assertFalse(guarded.ready_to_search)
+        self.assertEqual(guarded.next_action, "ask_followup")
+        self.assertIn("larger city", guarded.followup_questions[0].lower())
+
+    def test_neighborhood_preference_followup_is_dropped_for_city_wide_search(self) -> None:
+        guarded = apply_readiness_guards(
+            readiness_from_mapping(
+                {
+                    "ready_to_search": False,
+                    "ready_to_recommend": False,
+                    "confidence": "medium",
+                    "next_action": "ask_followup",
+                    "missing_required_fields": ["neighborhood preference"],
+                    "followup_questions": ["Do you have a preferred neighborhood or area in Boston?"],
+                }
+            ),
+            HousingSearchIntent(location="Boston, MA", max_price=1800, type_of_places=("Private room",)),
+            transcript=[{"role": "user", "content": "private room in Boston under 1800"}],
+        )
+
+        self.assertTrue(guarded.ready_to_search)
+        self.assertEqual(guarded.next_action, "request_confirmation")
+        self.assertEqual(guarded.followup_questions, ())
+
+    def test_vague_city_search_asks_provider_routing_question(self) -> None:
+        guarded = apply_readiness_guards(
+            readiness_from_mapping(
+                {
+                    "ready_to_search": True,
+                    "ready_to_recommend": False,
+                    "confidence": "medium",
+                    "next_action": "plan_search",
+                }
+            ),
+            HousingSearchIntent(location="Boston, MA", max_price=1800),
+            transcript=[{"role": "user", "content": "I need housing in Boston under 1800"}],
+        )
+
+        self.assertFalse(guarded.ready_to_search)
+        self.assertEqual(guarded.next_action, "ask_followup")
+        self.assertIn("multiple roommates", guarded.followup_questions[0])
+        self.assertIn("affordable", guarded.followup_questions[0])
+
     def test_vague_new_york_apartment_can_follow_model_readiness(self) -> None:
         model_readiness = readiness_from_mapping(
             {

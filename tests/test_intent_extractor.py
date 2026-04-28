@@ -107,8 +107,8 @@ class IntentExtractorTests(unittest.TestCase):
         )
 
         self.assertEqual(intent.location, "Boston, MA")
-        self.assertEqual(intent.neighborhoods, ("Back Bay",))
-        self.assertEqual(intent.avoid_neighborhoods, ("Far commute",))
+        self.assertEqual(intent.neighborhoods, ())
+        self.assertEqual(intent.avoid_neighborhoods, ())
         self.assertEqual(intent.min_price, 1000)
         self.assertEqual(intent.max_price, 1800)
         self.assertEqual(intent.price_basis, "per_person")
@@ -134,6 +134,36 @@ class IntentExtractorTests(unittest.TestCase):
         self.assertFalse(intent.section8)
         self.assertEqual(intent.flexibility_notes, ("dates can slide",))
         self.assertEqual(intent.notes, ("near campus",))
+
+    def test_neighborhood_only_location_is_not_used_as_search_location(self) -> None:
+        fake = FakeJsonClient(json.dumps({"location": "Cambridge", "type_of_places": ["Private room"]}))
+
+        result = extract_housing_intent("private room in Cambridge", client=fake, today="2026-04-28")
+
+        self.assertIsNone(result.intent.location)
+        self.assertEqual(result.intent.neighborhoods, ())
+
+    def test_neighborhood_followup_preserves_previous_city_location(self) -> None:
+        previous = {"location": "Boston, MA", "type_of_places": ["Private room"], "intent_kind": "student_sublet"}
+        fake = FakeJsonClient(
+            json.dumps(
+                {
+                    "location": "Cambridge",
+                    "type_of_places": ["Private room"],
+                    "intent_kind": "student_sublet",
+                }
+            )
+        )
+
+        result = update_housing_intent(
+            previous,
+            "I prefer Cambridge",
+            client=fake,
+            today="2026-04-28",
+        )
+
+        self.assertEqual(result.intent.location, "Boston, MA")
+        self.assertEqual(result.intent.neighborhoods, ())
 
     def test_extract_housing_intent_uses_mocked_mistral_client_and_plans_providers(self) -> None:
         fake = FakeJsonClient(

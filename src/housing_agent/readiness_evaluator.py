@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from .intent_extractor import JsonChatClient, parse_json_object
 from .llm_client import DEFAULT_MISTRAL_MODEL, MistralChatClient
+from .location_scope import asks_for_neighborhood_preference, is_neighborhood_only_location
 from .types import HousingSearchIntent, SearchReadiness
 
 
@@ -26,6 +27,10 @@ Definitions:
 - Ask at most two follow-up questions.
 - Prefer searching over asking when missing information can be safely inferred or handled as a soft preference.
 - Ask follow-up questions only when missing information would materially change the search.
+- Do not ask for neighborhood preferences. The provider searches are city-wide, so neighborhoods are not initial search filters.
+- If the user only supplied a neighborhood, campus area, or small area, ask for the larger city or metro area to search.
+- If city is known but the housing type is vague, ask one routing question to distinguish:
+  solo/private-room/sublet searches, full rentals for multiple roommates, and affordable/voucher/accessibility searches.
 - If the user says they do not know a value, treat that value as flexible/unknown and move to the next most useful question instead of repeating the same question.
 - Do not say all required fields are provided if you are returning followup_questions or next_action is ask_followup.
 
@@ -37,7 +42,7 @@ For general rentals:
 - Need move_in_date, useful move-in timing, or a clear flexible/browsing signal.
 
 For student/sublet searches:
-- Need campus, school, neighborhood, or city.
+- Need a larger city or metro area.
 - Budget per person or total budget is very useful, but if the user does not know it, treat budget as flexible and ask about room type or timing instead.
 - Room type or bedroom need is very useful, but can be handled as unknown if the user is flexible.
 - Move-in/move-out timing, semester/season timing, or lease/sublet duration is important. A phrase like summer program is a useful timing signal.
@@ -138,11 +143,41 @@ def apply_readiness_guards(
             hard_constraints=readiness.hard_constraints,
             soft_preferences=readiness.soft_preferences,
             safe_assumptions=readiness.safe_assumptions,
-            followup_questions=("What city, neighborhood, campus area, or ZIP code should I search in?",),
+            followup_questions=("What larger city or metro area should I search in?",),
             reasoning_summary=(
                 readiness.reasoning_summary
                 or "I need a location before this search can be useful."
             ),
+        )
+
+    if is_neighborhood_only_location(intent.location):
+        return SearchReadiness(
+            ready_to_search=False,
+            ready_to_recommend=False,
+            confidence=_lower_confidence(readiness.confidence),
+            next_action="ask_followup",
+            missing_required_fields=_merge_strings(("larger city",), readiness.missing_required_fields),
+            hard_constraints=readiness.hard_constraints,
+            soft_preferences=readiness.soft_preferences,
+            safe_assumptions=readiness.safe_assumptions,
+            followup_questions=("What larger city or metro area should I search for that area?",),
+            reasoning_summary="I need the larger city because the housing sites search city-wide, not by exact neighborhood.",
+        )
+
+    if not _has_provider_routing_signal(intent):
+        return SearchReadiness(
+            ready_to_search=False,
+            ready_to_recommend=False,
+            confidence=_lower_confidence(readiness.confidence),
+            next_action="ask_followup",
+            missing_required_fields=_merge_strings(("housing search type",), readiness.missing_required_fields),
+            hard_constraints=readiness.hard_constraints,
+            soft_preferences=readiness.soft_preferences,
+            safe_assumptions=readiness.safe_assumptions,
+            followup_questions=(
+                "Is this just for you/private room/student/sublet, a regular rental/full rental with multiple roommates, or affordable/voucher/accessibility housing?",
+            ),
+            reasoning_summary="I need to choose the right housing source before searching.",
         )
 
     next_action = readiness.next_action
@@ -151,16 +186,38 @@ def apply_readiness_guards(
     if readiness.followup_questions and next_action != "ask_followup":
         next_action = "ask_followup"
     if next_action == "ask_followup" and readiness.followup_questions:
+        followup_questions = _drop_neighborhood_followups(
+            _dedupe_repeated_followups(readiness.followup_questions, transcript=transcript)
+        )
+        if not followup_questions:
+            return SearchReadiness(
+                ready_to_search=True,
+                ready_to_recommend=readiness.ready_to_recommend,
+                confidence=readiness.confidence,
+                next_action="request_confirmation",
+                missing_required_fields=_drop_neighborhood_fields(readiness.missing_required_fields),
+                hard_constraints=readiness.hard_constraints,
+                soft_preferences=readiness.soft_preferences,
+                safe_assumptions=_merge_strings(
+                    ("Run the initial search city-wide; neighborhood preferences are not source filters.",),
+                    readiness.safe_assumptions,
+                ),
+                followup_questions=(),
+                reasoning_summary=(
+                    readiness.reasoning_summary
+                    or "I can start with a city-wide search because neighborhood preferences are not source filters."
+                ),
+            )
         return SearchReadiness(
             ready_to_search=False,
             ready_to_recommend=False,
             confidence=_lower_confidence(readiness.confidence),
             next_action="ask_followup",
-            missing_required_fields=readiness.missing_required_fields,
+            missing_required_fields=_drop_neighborhood_fields(readiness.missing_required_fields),
             hard_constraints=readiness.hard_constraints,
-            soft_preferences=readiness.soft_preferences,
+            soft_preferences=_drop_neighborhood_fields(readiness.soft_preferences),
             safe_assumptions=readiness.safe_assumptions,
-            followup_questions=_dedupe_repeated_followups(readiness.followup_questions, transcript=transcript),
+            followup_questions=followup_questions,
             reasoning_summary=_clean_reasoning_summary(readiness.reasoning_summary, asking_followup=True),
         )
 
@@ -187,7 +244,9 @@ def apply_readiness_guards(
         hard_constraints=readiness.hard_constraints,
         soft_preferences=readiness.soft_preferences,
         safe_assumptions=readiness.safe_assumptions,
-        followup_questions=_dedupe_repeated_followups(readiness.followup_questions, transcript=transcript),
+        followup_questions=_drop_neighborhood_followups(
+            _dedupe_repeated_followups(readiness.followup_questions, transcript=transcript)
+        ),
         reasoning_summary=_clean_reasoning_summary(readiness.reasoning_summary, asking_followup=next_action == "ask_followup"),
     )
 
@@ -201,6 +260,52 @@ def _intent_kind(intent: HousingSearchIntent) -> str:
     if intent.type_of_places or "sublet" in text or "student" in text or "campus" in text:
         return "student_sublet"
     return "general_rental"
+
+
+def _has_provider_routing_signal(intent: HousingSearchIntent) -> bool:
+    text = _intent_text(intent)
+    if intent.intent_kind and intent.intent_kind != "unknown":
+        return True
+    if intent.roommate_count is not None:
+        return True
+    if intent.section8 or intent.income_restricted or intent.wheelchair_accessible:
+        return True
+    if intent.utilities_included or intent.washer_dryer:
+        return True
+    if intent.campus_or_school:
+        return True
+    if intent.type_of_places or intent.property_types:
+        return True
+
+    signals = (
+        "student",
+        "sublet",
+        "sublease",
+        "private room",
+        "shared room",
+        "just me",
+        "only me",
+        "for myself",
+        "solo",
+        "single person",
+        "roommate",
+        "roommates",
+        "group rental",
+        "apartment",
+        "house",
+        "townhouse",
+        "condo",
+        "voucher",
+        "section 8",
+        "section8",
+        "affordable",
+        "income restricted",
+        "income-restricted",
+        "accessible",
+        "accessibility",
+        "wheelchair",
+    )
+    return any(signal in text for signal in signals)
 
 
 def _has_affordability_signal(intent: HousingSearchIntent) -> bool:
@@ -242,6 +347,14 @@ def _dedupe_repeated_followups(
     if not filtered:
         filtered.append("Are you looking for a private room, shared room, or an entire place?")
     return tuple(filtered[:2])
+
+
+def _drop_neighborhood_followups(questions: Sequence[str]) -> tuple[str, ...]:
+    return tuple(question for question in questions if not asks_for_neighborhood_preference(question))
+
+
+def _drop_neighborhood_fields(values: Sequence[str]) -> tuple[str, ...]:
+    return tuple(value for value in values if "neighborhood" not in value.lower() and "neighbourhood" not in value.lower())
 
 
 def _clean_reasoning_summary(summary: str, *, asking_followup: bool) -> str:
@@ -298,7 +411,6 @@ def _intent_text(intent: HousingSearchIntent) -> str:
         intent.commute_target or "",
         *intent.notes,
         *intent.flexibility_notes,
-        *intent.neighborhoods,
         *intent.property_types,
         *intent.type_of_places,
         *intent.amenities,

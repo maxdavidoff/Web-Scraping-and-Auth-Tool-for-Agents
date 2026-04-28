@@ -117,7 +117,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                     }
                 ]
             ),
-            readiness_evaluator=not_ready_readiness("What city, neighborhood, campus area, or ZIP code should I search in?"),
+            readiness_evaluator=not_ready_readiness("What larger city or metro area should I search in?"),
         )
 
         turn = agent.handle_user_message("I need a one bedroom under 1800")
@@ -148,6 +148,26 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         self.assertIn("student/sublet", turn.message)
         self.assertIn("regular rental", turn.message)
         self.assertIn("affordable/voucher", turn.message)
+
+    def test_vague_housing_with_city_gets_routing_clarification(self) -> None:
+        agent = InteractiveHousingAgent(
+            client=FakeJsonClient(
+                [
+                    {
+                        "location": "Boston, MA",
+                        "max_price": 1800,
+                    }
+                ]
+            ),
+            readiness_evaluator=ready_readiness,
+        )
+
+        turn = agent.handle_user_message("I need housing in Boston under 1800")
+
+        self.assertEqual(turn.state, "needs_clarification")
+        self.assertIn("private room", turn.message)
+        self.assertIn("multiple roommates", turn.message)
+        self.assertIn("affordable", turn.message)
 
     def test_clear_purpose_signals_do_not_over_clarify(self) -> None:
         scenarios = [
@@ -218,7 +238,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         agent = InteractiveHousingAgent(
             client=client,
             readiness_evaluator=readiness_sequence(
-                not_ready_readiness("What city, neighborhood, campus area, or ZIP code should I search in?"),
+                not_ready_readiness("What larger city or metro area should I search in?"),
                 ready_readiness,
             ),
         )
