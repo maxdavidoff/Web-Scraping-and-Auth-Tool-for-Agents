@@ -37,6 +37,30 @@ class ListingRankerTests(unittest.TestCase):
         self.assertEqual(payload["intent"]["location"], "Boston, MA")
         self.assertEqual(payload["records"][0]["title"], "Studio")
 
+    def test_listing_ranker_prompt_states_prices_are_monthly(self) -> None:
+        """Regression: ranker used to multiply $X/mo by sublet length and over-exclude."""
+        messages = build_listing_ranker_messages(
+            HousingSearchIntent(location="Philadelphia, PA", max_price=1800),
+            SearchReadiness(ready_to_search=True),
+            [{"title": "Room", "price": "$1,650/mo"}],
+        )
+        prompt = messages[0]["content"]
+        self.assertIn("MONTHLY", prompt)
+        self.assertIn("Do NOT multiply", prompt)
+        self.assertIn("timing signal, not a budget multiplier", prompt)
+
+    def test_listing_ranker_prompt_narrows_price_exclusion_rule(self) -> None:
+        """Regression: ranker invented 'per month vs per room' as an exclusion reason."""
+        messages = build_listing_ranker_messages(
+            HousingSearchIntent(location="Philadelphia, PA", max_price=1800),
+            SearchReadiness(ready_to_search=True),
+            [{"title": "Room", "price": "$1,650/mo"}],
+        )
+        prompt = messages[0]["content"]
+        self.assertIn("ONLY price-based reason to exclude", prompt)
+        self.assertIn("Do not exclude a listing for \"price basis mismatch\"", prompt)
+        self.assertIn("needs_verification", prompt)
+
     def test_rank_listings_parses_recommended_needs_verification_and_excluded(self) -> None:
         fake = FakeJsonClient(
             {

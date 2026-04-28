@@ -70,7 +70,8 @@ Field guidance:
 - pet_policy should preserve positive pet constraints like dogs, cats, pet friendly. Put negated pet constraints like no pets, no dogs, no cats, without pets in pet_policy_negated instead of pet_policy.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
 - Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
-- price_basis should be one of total, per_person, per_room, unknown.
+- price_basis should be one of total, per_person, per_room, unknown. price_basis describes WHO the budget covers (per-roommate share vs the whole unit), not the time period.
+- min_price and max_price are MONTHLY rent budgets. If the user gives a budget alongside a stay length ("$1800 for the summer", "$2500 for 6 months", "around $1500/month"), still record the monthly value in max_price. Only divide by the stay length if the user explicitly says the number is a total ("my total budget is $5000 for the whole summer").
 - safety_priority and student_priority should be low, medium, high, or unknown.
 - section8, income_restricted, wheelchair_accessible, utilities_included, washer_dryer are true only when explicit.
 - intent_kind should be one of student_sublet, general_rental, affordable, apartment, unknown.
@@ -118,7 +119,8 @@ Field guidance:
 - pet_policy should preserve positive pet constraints like dogs, cats, pet friendly. Put negated pet constraints like no pets, no dogs, no cats, without pets in pet_policy_negated instead of pet_policy.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
 - Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
-- price_basis should be one of total, per_person, per_room, unknown.
+- price_basis should be one of total, per_person, per_room, unknown. price_basis describes WHO the budget covers (per-roommate share vs the whole unit), not the time period.
+- min_price and max_price are MONTHLY rent budgets. If the user gives a budget alongside a stay length ("$1800 for the summer", "$2500 for 6 months", "around $1500/month"), still record the monthly value in max_price. Only divide by the stay length if the user explicitly says the number is a total ("my total budget is $5000 for the whole summer").
 - safety_priority and student_priority should be low, medium, high, or unknown.
 - section8, income_restricted, wheelchair_accessible, utilities_included, washer_dryer are true only when explicit.
 - intent_kind should be one of student_sublet, general_rental, affordable, apartment, unknown.
