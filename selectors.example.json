@@ -7,6 +7,9 @@
     "input[name*='search' i]"
   ],
   "result_card_selectors": [
+    "#rg_listings [id^='listing-']",
+    "#search-results [id^='listing-']",
+    "[id^='listing-']",
     "[data-testid*='listing' i]",
     "[class*='listing' i]",
     "[class*='card' i]",
@@ -19,6 +22,7 @@
   ],
   "title_selectors": [
     "[data-testid*='title' i]",
+    ".cvhfaV3",
     "[class*='title' i]",
     "h1",
     "h2",
@@ -26,6 +30,7 @@
   ],
   "price_selectors": [
     "[data-testid*='price' i]",
+    ".cvhfaI3",
     "[class*='price' i]"
   ],
   "location_selectors": [
