@@ -148,6 +148,8 @@ class RentalSourceUrlTests(unittest.TestCase):
     def test_slugify_location_handles_city_state_zip_and_empty_values(self) -> None:
         self.assertEqual(slugify_location("Boston, MA, USA"), "boston-ma")
         self.assertEqual(slugify_location("New York City, NY"), "new-york-city-ny")
+        self.assertEqual(slugify_location("Boston, MA 02118"), "boston-ma-02118")
+        self.assertEqual(slugify_location("Cambridge, MA 02139, USA"), "cambridge-ma-02139")
         self.assertEqual(slugify_location("02139"), "02139")
         with self.assertRaises(ValueError):
             slugify_location("   ")
@@ -185,6 +187,37 @@ class RentalSourceUrlTests(unittest.TestCase):
         self.assertEqual(query["featured"], ["Y"])
         self.assertEqual(query["sort"], ["price-high"])
         self.assertEqual(query["page"], ["2"])
+
+    def test_build_search_url_uses_category_path_for_single_apartment_or_house(self) -> None:
+        apartment_url = build_rentalsource_search_url(
+            location="Boston, MA",
+            property_types=["Apartment"],
+        )
+        apartment = urlparse(apartment_url)
+        self.assertEqual(apartment.path, "/boston-ma/apartments/")
+        self.assertEqual(parse_qs(apartment.query)["types[]"], ["apt"])
+
+        house_url = build_rentalsource_search_url(
+            location="Philadelphia, PA",
+            property_types=["House"],
+        )
+        house = urlparse(house_url)
+        self.assertEqual(house.path, "/philadelphia-pa/houses/")
+        self.assertEqual(parse_qs(house.query)["types[]"], ["hous"])
+
+    def test_build_search_url_passthroughs_explicit_url(self) -> None:
+        direct_url = "https://www.rentalsource.com/boston-ma/apartments/?page=2"
+        self.assertEqual(build_rentalsource_search_url(search_url=direct_url), direct_url)
+        self.assertEqual(build_rentalsource_search_url(location=direct_url), direct_url)
+
+    def test_build_search_url_keeps_existing_positional_argument_order(self) -> None:
+        url = build_rentalsource_search_url("Boston, MA", ["Apartment"], 1)
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/boston-ma/apartments/")
+        self.assertEqual(query["types[]"], ["apt"])
+        self.assertEqual(query["beds"], ["1"])
 
 
 class RentalSourceParsingTests(unittest.TestCase):

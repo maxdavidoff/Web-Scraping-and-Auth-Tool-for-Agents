@@ -169,7 +169,7 @@ def run_ohana_search(options: OhanaSearchOptions) -> OhanaSearchResult:
             print("When the results are visible, return here and press ENTER.")
             input("Press ENTER to extract visible results... ")
         else:
-            if "/search?" in search_url:
+            if "/search?" in search_url or "/sublet/" in search_url:
                 print("Using filtered search URL directly; skipping automated search input.")
                 try:
                     page.wait_for_load_state("networkidle", timeout=8_000)

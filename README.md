@@ -1,23 +1,27 @@
-# Ohana Search Agent — Simple Playwright Starter
+# Housing Search Agent — Provider-Aware Browser Tools
 
-This is a small, test-first browser automation project for logging into Ohana with your own account, running a search, extracting visible listing-card information, and saving results to files. It also includes a lightweight LLM planner that can turn a student's natural-language housing request into an Ohana search, run the scraper, and summarize the results.
+This is a small, test-first housing search project for logging into housing providers with your own account when needed, running searches, extracting visible listing-card information, and saving results to files. It also includes an LLM-assisted housing chat loop, deterministic provider capability/query planning, explicit execution confirmation, and post-result listing fit ranking.
 
 It intentionally does **not** bypass Cloudflare, CAPTCHAs, login protections, private APIs, or rate limits. Use it only with an account you are allowed to use and only at low, human-like volume.
 
 ## What it does
 
-1. Opens Ohana in a real Chromium browser.
-2. Lets you log in manually once.
-3. Saves the browser session to `auth/ohana_state.json`.
-4. Reuses that session to open a search page.
-5. Either:
-   - lets you perform the search manually, or
-   - tries to fill a search box using editable selectors.
-6. Extracts likely listing cards from the visible search results.
-7. Saves:
+1. Extracts or updates a provider-neutral `HousingSearchIntent` from user language.
+2. Evaluates search readiness: what is required, what is flexible, and whether a follow-up is useful.
+3. Builds a deterministic provider-aware query plan for:
+   - Ohana
+   - RentalSource
+   - AffordableHousing.com
+4. Shows the user which provider should run first and why.
+5. Executes only after explicit confirmation.
+6. Routes execution through the deterministic provider router, not through the LLM.
+7. Ranks returned listings against the user intent without inventing missing facts.
+8. Saves scraper outputs:
    - raw JSONL to `data/raw/`
    - readable CSV to `data/processed/`
    - screenshot + HTML debug files to `data/debug/`
+
+The LLM is used for language understanding, search readiness, and result-fit explanation. Deterministic code owns provider ranking, URL/query construction, confirmation state, and scraper execution.
 
 ## Folder structure
 
@@ -31,18 +35,33 @@ ohana_search_agent/
     processed/                    # CSV results
     debug/                        # screenshot + HTML snapshots
 
+  src/housing_agent/
+    intent_extractor.py           # Mistral-backed provider-neutral intent extraction
+    readiness_evaluator.py        # Mistral-backed search readiness/follow-up policy
+    listing_ranker.py             # Mistral-backed listing fit ranking after execution
+    llm_client.py                 # small stdlib Mistral chat-completion client
+    provider_capabilities.py      # provider capability matrix
+    query_planner.py              # deterministic query planning/reporting
+    search_app.py                 # one-shot plan/execute app API
+    interactive_agent.py          # stateful terminal chat controller
+    types.py                      # shared intent/readiness/query/ranking dataclasses
+
   src/ohana_agent/
     browser.py                    # Playwright browser/session helpers
     config.py                     # settings and paths
     extractor.py                  # DOM extraction logic
-    housing_agent.py              # LLM planner + student-facing result summary
+    provider_router.py            # deterministic multi-provider router
     parsing.py                    # field normalization / regex guesses
     search_runner.py              # importable Ohana scraping tool
     storage.py                    # JSONL + CSV writers
 
-  save_ohana_login.py             # Step 1: save login session
-  run_ohana_search.py             # Step 2: run/extract search
-  run_housing_agent.py            # LLM student-housing agent
+  run_housing_chat.py             # interactive agent-user loop
+  run_housing_search.py           # one-shot plan/execute flow
+  run_housing_intent.py           # intent extraction + query plan only
+  save_ohana_login.py             # save Ohana login session
+  run_ohana_search.py             # run/extract Ohana search
+  run_rentalsource_search.py      # run/extract RentalSource search
+  run_affordablehousing_search.py # run/extract AffordableHousing search
   selectors.example.json          # editable selectors
   requirements.txt
   .env.example
@@ -66,12 +85,71 @@ Optional: copy `.env.example` to `.env` and edit defaults:
 cp .env.example .env
 ```
 
-For the LLM student-housing agent, set:
+For provider-neutral intent extraction, set:
 
 ```bash
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4.1-mini
+MISTRAL_API_KEY=...
+MISTRAL_MODEL=mistral-small-latest
 ```
+
+No extra Python package is required for the LLM layers; the project uses the small stdlib Mistral client in `src/housing_agent/llm_client.py`.
+
+## Interactive housing chat
+
+Use the chat agent to experience the product flow:
+
+```bash
+python run_housing_chat.py --max-listings 5
+```
+
+Example:
+
+```text
+> i need to find somewhere to stay for a summer program at upenn
+```
+
+The agent updates a merged `HousingSearchIntent`, evaluates whether enough information is present, asks at most a small number of useful follow-up questions, then proposes the best provider to run first. Execution requires a clear confirmation such as:
+
+```text
+yes
+```
+
+Useful commands inside the chat:
+
+```text
+help
+show
+plan
+json
+transcript
+max-listings 3
+reset
+quit
+```
+
+`json` is debug-only and shows the current intent, readiness object, provider plan, pending confirmation state, execution result, and listing ranking state.
+
+## Agent architecture
+
+The safe agent flow is:
+
+```text
+user conversation
+  -> LLM updates full merged HousingSearchIntent
+  -> LLM evaluates SearchReadiness
+  -> deterministic query planner ranks providers and explains filter application
+  -> user confirms execution
+  -> deterministic provider router runs executable scrapers
+  -> LLM ranks returned listings against the intent
+```
+
+Hard boundary:
+
+- The LLM does **not** call scrapers.
+- The LLM does **not** build provider URLs.
+- The LLM does **not** choose browser flags or execution commands.
+- Execution goes through `src.ohana_agent.provider_router.run_provider_searches`.
+- Provider-specific CLI tools remain available for direct testing.
 
 ## Step 1 — Save your Ohana login session
 
@@ -139,59 +217,75 @@ PYTHONPATH=src python -u run_ohana_search.py \
 
 If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
 
-## Step 4 — Run the student housing agent
+## Query planning layer
 
-After your Ohana login session is saved, start the intake flow:
-
-```bash
-python run_housing_agent.py --max-listings 10 --fetch-listing-api
-```
-
-The agent will:
-
-1. Ask what the student is looking for.
-2. Ask follow-up questions to refine the search.
-3. Clarify whether this is a solo room/sublet search or a longer lease with friends.
-4. Stop asking questions when the student says something like "that's all", "done", or "search now".
-5. Build the Ohana filtered search URL and scrape automatically.
-6. Save CSV/JSONL outputs and produce a short student-facing summary.
-
-You can seed the intake with an initial request:
-
-```bash
-python run_housing_agent.py \
-  "I'm a Northeastern student looking for a furnished private room in Boston under $1800" \
-  --max-listings 10
-```
-
-To skip follow-up questions and use the older one-shot behavior:
-
-```bash
-python run_housing_agent.py \
-  "furnished private room near Northeastern under $1800 from May 1 to August 31, 2026" \
-  --one-shot
-```
-
-If you want to watch the browser while debugging:
-
-```bash
-python run_housing_agent.py "private room near NYU under $2200 for fall 2026" --headed
-```
-
-The reusable integration point for a larger system is:
+The old direct LLM-to-scraper bridge has been removed. The current reusable integration point is layered: extract a provider-neutral structured intent, inspect provider capability/query quality, then call the router explicitly.
 
 ```python
-from src.ohana_agent.housing_agent import run_student_housing_agent
+from src.housing_agent import HousingSearchIntent, plan_query
 
-result = run_student_housing_agent(
-    "Private room near Harvard under $1700 from June 1 to August 31, 2026",
-    max_listings=10,
-    fetch_listing_api=True,
+intent = HousingSearchIntent(
+    location="Boston, MA",
+    max_price=1800,
+    bedrooms=1,
+    type_of_places=("Private room",),
+    furnished=True,
+    intent_kind="student_sublet",
 )
 
-print(result.plan)
-print(result.search.records)
-print(result.summary)
+query_plan = plan_query(intent)
+print(query_plan.ranked_provider_names)
+print(query_plan.for_provider("ohana").report.applied_at_source)
+```
+
+Provider scraping still happens through provider-specific CLIs or the deterministic router in `src.ohana_agent.provider_router`. Conversational code should target the intent/readiness/query-planning APIs and call only the deterministic provider router for execution.
+
+To use Mistral for intent extraction without scraping:
+
+```bash
+python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
+```
+
+The CLI prints the extracted `HousingSearchIntent` and the provider query plan.
+
+For the product-facing search flow, use `run_housing_search.py`. By default it only plans the search and prints the extracted intent, ranked providers, query quality, source-applied filters, unsupported/unverified filters, and execution warnings:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
+```
+
+For a back-and-forth terminal experience, use the interactive chat agent:
+
+```bash
+python run_housing_chat.py --max-listings 5
+```
+
+The chat agent maintains intent across turns, asks follow-up questions when the readiness layer says the search would otherwise be weak, proposes the best provider to search first, and only executes after the user confirms with a reply like `yes`.
+
+Scraping is opt-in:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
+```
+
+The execution path filters out any provider that is not wired to an executable scraper.
+
+Live Mistral tests are opt-in:
+
+```bash
+RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY=... python3 -m unittest tests.test_intent_extractor -v
+```
+
+or:
+
+```bash
+python3 run_live_llm_tests.py
+```
+
+Live browser scrape tests are opt-in:
+
+```bash
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
 ## Updating selectors

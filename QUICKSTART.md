@@ -21,6 +21,20 @@ Run only the live scrape tests locally:
 python3 run_live_scrape_tests.py --install-chromium
 ```
 
+Run mocked Mistral intent extraction tests. Live LLM calls are skipped unless
+you set `RUN_LIVE_LLM_TESTS=1` and `MISTRAL_API_KEY`:
+
+```bash
+python3 -m unittest tests.test_intent_extractor -v
+```
+
+Run the live Mistral intent extraction test locally:
+
+```bash
+export MISTRAL_API_KEY="..."
+python3 run_live_llm_tests.py
+```
+
 Save login:
 
 ```bash
@@ -41,17 +55,46 @@ data/raw/
 data/debug/
 ```
 
-Run the LLM student-housing agent:
+Extract and plan a provider-neutral housing intent without scraping:
 
 ```bash
-export OPENAI_API_KEY="..."
-python run_housing_agent.py --max-listings 10
+export MISTRAL_API_KEY="..."
+python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
 ```
 
-Or seed the intake with an initial request:
+Plan the user-facing search experience without scraping:
 
 ```bash
-python run_housing_agent.py "furnished private room near Northeastern under $1800" --max-listings 10
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
+```
+
+Try the interactive chat agent:
+
+```bash
+python run_housing_chat.py --max-listings 5
+```
+
+The chat agent:
+
+1. updates a provider-neutral housing intent from the conversation,
+2. evaluates whether the search is ready or needs a useful follow-up,
+3. proposes the best provider to run first,
+4. asks before executing anything,
+5. ranks returned listings against the intent after execution.
+
+Reply `yes` to execute the proposed search, or `no` to keep planning. Use `json` inside the chat to inspect the current intent, readiness object, provider plan, execution state, and ranking output.
+
+Execute only when you explicitly want live scrapers to run:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
+```
+
+No live LLM or browser scrape tests run by default. Use these only when you explicitly want live calls:
+
+```bash
+RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY="..." python3 -m unittest tests.test_intent_extractor -v
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
 AffordableHousing.com:

@@ -1,0 +1,143 @@
+[
+  {
+    "name": "student_sublet_boston",
+    "user_message": "I need a furnished private room in Boston under 1800 for the summer",
+    "model_response": {
+      "location": "Boston, MA",
+      "max_price": 1800,
+      "bedrooms": 1,
+      "type_of_places": ["Private room"],
+      "furnished": true,
+      "move_in_date": "2026-06-01",
+      "move_out_date": "2026-08-31",
+      "intent_kind": "student_sublet",
+      "notes": ["summer student sublet"]
+    },
+    "expected_intent": {
+      "location": "Boston, MA",
+      "max_price": 1800,
+      "bedrooms": 1,
+      "type_of_places": ["Private room"],
+      "furnished": true,
+      "move_in_date": "2026-06-01",
+      "move_out_date": "2026-08-31",
+      "intent_kind": "student_sublet"
+    },
+    "expected_top_provider": "ohana",
+    "expected_score_greater_than": [
+      ["rentalsource", "affordablehousing"]
+    ],
+    "expected_filter_application": {
+      "ohana": {
+        "applied_at_source": ["location", "max_price", "bedrooms", "type_of_places", "furnished"],
+        "unknown_unverified": ["move_in_date", "move_out_date"]
+      }
+    },
+    "expected_user_visible_warnings": [
+      "planning mode only",
+      "date filters are unverified or not source-applied"
+    ]
+  },
+  {
+    "name": "general_pet_friendly_apartment_philly",
+    "user_message": "Find a pet friendly 2 bed apartment in Philadelphia under 2600 with photos sorted by newest",
+    "model_response": {
+      "location": "Philadelphia, PA",
+      "max_price": 2600,
+      "bedrooms": 2,
+      "property_types": ["Apartment"],
+      "pet_policy": ["pet friendly"],
+      "photos": true,
+      "sort": "newest",
+      "intent_kind": "general_rental",
+      "notes": []
+    },
+    "expected_intent": {
+      "location": "Philadelphia, PA",
+      "max_price": 2600,
+      "bedrooms": 2,
+      "property_types": ["Apartment"],
+      "pet_policy": ["pet friendly"],
+      "photos": true,
+      "sort": "newest",
+      "intent_kind": "general_rental"
+    },
+    "expected_top_provider": "rentalsource",
+    "expected_score_greater_than": [
+      ["rentalsource", "affordablehousing"]
+    ],
+    "expected_filter_application": {
+      "rentalsource": {
+        "applied_at_source": ["location", "max_price", "bedrooms", "property_types", "pet_policy", "photos", "sort"]
+      }
+    },
+    "expected_user_visible_warnings": [
+      "planning mode only"
+    ]
+  },
+  {
+    "name": "section8_income_restricted_boston",
+    "user_message": "I have a Section 8 voucher and need income restricted housing in Boston under 1600",
+    "model_response": {
+      "location": "Boston, MA",
+      "max_price": 1600,
+      "section8": true,
+      "income_restricted": true,
+      "intent_kind": "affordable",
+      "notes": ["voucher holder"]
+    },
+    "expected_intent": {
+      "location": "Boston, MA",
+      "max_price": 1600,
+      "section8": true,
+      "income_restricted": true,
+      "intent_kind": "affordable"
+    },
+    "expected_top_provider": "affordablehousing",
+    "expected_filter_application": {
+      "affordablehousing": {
+        "applied_at_source": ["location", "max_price", "section8", "income_restricted"]
+      }
+    },
+    "expected_user_visible_warnings": [
+      "planning mode only"
+    ]
+  },
+  {
+    "name": "amenity_heavy_apartment_new_york",
+    "user_message": "NYC apartment 1 to 2 bedrooms under 4200 with gym, in unit laundry, dogs allowed, near NYU",
+    "model_response": {
+      "location": "New York, NY",
+      "max_price": 4200,
+      "bedroom_min": 1,
+      "bedroom_max": 2,
+      "property_types": ["Apartment"],
+      "pet_policy": ["dogs allowed"],
+      "amenities": ["gym", "in-unit laundry"],
+      "keyword": "near NYU",
+      "intent_kind": "apartment",
+      "notes": ["amenity-heavy apartment search"]
+    },
+    "expected_intent": {
+      "location": "New York, NY",
+      "max_price": 4200,
+      "bedroom_min": 1,
+      "bedroom_max": 2,
+      "property_types": ["Apartment"],
+      "pet_policy": ["dogs allowed"],
+      "amenities": ["gym", "in-unit laundry"],
+      "keyword": "near NYU",
+      "intent_kind": "apartment"
+    },
+    "expected_top_provider": "rentalsource",
+    "expected_filter_application": {
+      "rentalsource": {
+        "applied_at_source": ["location", "max_price", "bedroom_min", "property_types", "pet_policy"],
+        "unknown_unverified": ["amenities", "keyword"]
+      }
+    },
+    "expected_user_visible_warnings": [
+      "planning mode only"
+    ]
+  }
+]
