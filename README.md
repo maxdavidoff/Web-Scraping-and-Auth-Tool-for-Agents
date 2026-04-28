@@ -46,6 +46,8 @@ ohana_search_agent/
     query_planner.py              # deterministic query planning/reporting
     search_app.py                 # one-shot plan/execute app API
     interactive_agent.py          # stateful terminal chat controller
+    ui_server.py                  # local stdlib web UI server
+    ui_static/                    # HTML/CSS/JS for the browser UI
     types.py                      # shared intent/readiness/query/ranking dataclasses
 
   src/ohana_agent/
@@ -58,6 +60,7 @@ ohana_search_agent/
     storage.py                    # JSONL + CSV writers
 
   run_housing_chat.py             # interactive agent-user loop
+  run_housing_ui.py               # local browser UI
   run_housing_search.py           # one-shot plan/execute flow
   run_housing_intent.py           # intent extraction + query plan only
   save_ohana_login.py             # save Ohana login session
@@ -130,6 +133,22 @@ quit
 ```
 
 `json` is debug-only and shows the current intent, readiness object, provider plan, pending confirmation state, execution result, and listing ranking state.
+
+## Local browser UI
+
+Run the browser UI when you want the final user-facing loop with chat, structured intent, provider plan, execution status, listing cards, listing images, output files, and generated scraper screenshots:
+
+```bash
+python run_housing_ui.py --max-listings 5 --fetch-listing-api
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The UI wraps `InteractiveHousingAgent`; it does not call provider scrapers directly. A search only runs after the agent has proposed a plan and the user clicks `Run Search` or replies `yes`. The UI renders artifact links from `data/debug/`, `data/raw/`, and `data/processed/`, including provider search-page screenshots saved by the scrapers.
 
 ## Agent architecture
 

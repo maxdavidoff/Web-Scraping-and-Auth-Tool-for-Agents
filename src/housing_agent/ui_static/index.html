@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Housing Search Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="chat-pane" aria-label="Housing chat">
+        <header class="pane-header">
+          <div>
+            <h1>Housing Search Agent</h1>
+            <p id="stateLabel">Ready</p>
+          </div>
+          <button id="resetButton" class="icon-button" type="button" title="Reset search" aria-label="Reset search">Reset</button>
+        </header>
+
+        <div id="chatLog" class="chat-log" aria-live="polite"></div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="messageInput" rows="2" placeholder="Tell me what you need..." autocomplete="off"></textarea>
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <section class="workspace" aria-label="Search workspace">
+        <div class="toolbar">
+          <button id="runButton" type="button" disabled>Run Search</button>
+          <button id="cancelButton" type="button" disabled>Cancel</button>
+        </div>
+
+        <section class="panel search-summary">
+          <h2>Search Summary</h2>
+          <div id="summaryPanel" class="summary muted">Tell me what you need, then I will ask only the next useful question.</div>
+        </section>
+
+        <section class="panel primary-results">
+          <h2>Listings</h2>
+          <div id="listingsPanel" class="listing-list muted">No listings yet.</div>
+        </section>
+
+        <details class="developer-details">
+          <summary>Developer details</summary>
+          <section class="panel">
+            <h2>Agent Debug Message</h2>
+            <div id="debugMessagePanel" class="debug-message muted">No debug message yet.</div>
+          </section>
+          <div class="grid">
+            <section class="panel">
+              <h2>Intent</h2>
+              <div id="intentPanel" class="key-values muted">No intent yet.</div>
+            </section>
+
+            <section class="panel">
+              <h2>Readiness</h2>
+              <div id="readinessPanel" class="readiness muted">No readiness check yet.</div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <h2>Provider Plan</h2>
+            <div id="planPanel" class="provider-list muted">No provider plan yet.</div>
+          </section>
+
+          <section class="panel">
+            <h2>Execution</h2>
+            <div id="executionPanel" class="execution muted">No search has run yet.</div>
+          </section>
+
+          <section class="panel">
+            <h2>Provider Screenshots And Files</h2>
+            <div id="artifactsPanel" class="artifact-list muted">No screenshots yet.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-title-row">
+              <h2>Raw JSON</h2>
+              <button id="jsonButton" type="button">Open</button>
+            </div>
+            <pre id="jsonInline" class="inline-json">{}</pre>
+          </section>
+        </details>
+      </section>
+    </main>
+
+    <dialog id="jsonDialog">
+      <header class="dialog-header">
+        <h2>Debug JSON</h2>
+        <button id="closeJsonButton" class="icon-button" type="button" aria-label="Close JSON">Close</button>
+      </header>
+      <pre id="jsonOutput"></pre>
+    </dialog>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
