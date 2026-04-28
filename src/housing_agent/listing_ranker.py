@@ -26,6 +26,15 @@ Distinguish hard-constraint failures from soft-preference weaknesses.
 A listing that violates a hard constraint should not be recommended, but may be shown under "excluded" with the reason.
 A listing with unknown information may be shown as "needs_verification".
 
+Price interpretation:
+- intent.max_price and intent.min_price are MONTHLY rent budgets unless intent.price_basis explicitly says otherwise.
+- Listing prices like "$1,650/mo", "$1,650/month", or a bare "$1,650" on a rental card are also monthly rent.
+- Do NOT multiply a monthly listing price by the number of months in a sublet, summer program, or lease term to compare against the user's budget. "For the summer" is a timing signal, not a budget multiplier.
+- A monthly listing price that is at or below intent.max_price satisfies the price constraint, regardless of how long the user plans to stay.
+- The ONLY price-based reason to exclude a listing is: parsed monthly listing price > intent.max_price, OR parsed monthly listing price < intent.min_price. Nothing else.
+- intent.price_basis ("total" / "per_person" / "per_room") describes who the budget covers, NOT the price period. Do not exclude a listing for "price basis mismatch": when type_of_places includes "Private room", a listing showing "$X/mo" for that room IS the per-room price. There is no mismatch to act on.
+- If you cannot parse a monthly number from the listing price, mark price as missing_info and bucket the listing as needs_verification — do not exclude.
+
 Return exactly one JSON object.
 
 Output keys:
