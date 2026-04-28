@@ -24,6 +24,7 @@ from .types import HousingSearchIntent, ListingRankingResult, QueryPlan, RankedL
 AgentRunner = Callable[..., Any]
 ReadinessEvaluator = Callable[..., SearchReadiness]
 ListingRanker = Callable[..., ListingRankingResult]
+BACKUP_PROVIDER_SCORE_RATIO = 0.60
 
 HELP_TEXT = """
 Tell me what you are looking for in normal language. I will ask one clarification if I need it, then suggest the best source to search first.
@@ -679,11 +680,12 @@ class InteractiveHousingAgent:
 
         top_plan = self.latest_plan.provider_plans[0]
         proposed = self.proposed_execution_providers or self._recommended_execution_providers()
-        lines = [
-            _one_line_intent(self.current_intent),
-            "",
-            f"I’d start with {_provider_label(top_plan.provider)} because {_user_facing_reason(top_plan.provider)}",
-        ]
+        lines = [_one_line_intent(self.current_intent), ""]
+        if len(proposed) > 1:
+            provider_text = " and ".join(_provider_label(provider) for provider in proposed)
+            lines.append(f"I’d compare {provider_text} so we can pick the best matches across both sources.")
+        else:
+            lines.append(f"I’d start with {_provider_label(top_plan.provider)} because {_user_facing_reason(top_plan.provider)}")
         if self.latest_readiness and self.latest_readiness.reasoning_summary:
             lines.extend(["", self.latest_readiness.reasoning_summary])
         if self.latest_readiness and not self.latest_readiness.ready_to_recommend:
@@ -712,20 +714,28 @@ class InteractiveHousingAgent:
             return ()
         executable_providers, _skipped = executable_provider_plan(self.latest_plan)
         executable = set(executable_providers)
+        affordable_allowed = _affordability_intent(self.current_intent) or (
+            self.providers is not None and AFFORDABLEHOUSING in set(self.providers)
+        )
         candidates = [
             provider_plan
             for provider_plan in self.latest_plan.provider_plans
             if provider_plan.provider in executable
+            and (provider_plan.provider != AFFORDABLEHOUSING or affordable_allowed)
         ]
         if not candidates:
             return ()
         top_score = candidates[0].score
-        threshold = top_score * 0.7 if top_score > 0 else top_score
+        threshold = top_score * BACKUP_PROVIDER_SCORE_RATIO if top_score > 0 else top_score
         selected = [
             provider_plan.provider
             for provider_plan in candidates
             if provider_plan.score >= threshold
         ]
+        if _flexible_cross_provider_intent(self.current_intent):
+            for provider in (OHANA, RENTALSOURCE):
+                if provider in executable and provider not in selected:
+                    selected.append(provider)
         return tuple(selected[:2])
 
     def _planning_payload(self) -> dict[str, Any] | None:
@@ -827,6 +837,55 @@ def _has_purpose_signal(intent: HousingSearchIntent) -> bool:
         "normal apartment",
     )
     return any(term in text for term in purpose_terms)
+
+
+def _affordability_intent(intent: HousingSearchIntent | None) -> bool:
+    if not intent:
+        return False
+    text = " ".join([intent.intent_kind or "", *intent.notes, *intent.flexibility_notes, intent.keyword or ""]).lower()
+    return bool(
+        intent.section8
+        or intent.income_restricted
+        or intent.wheelchair_accessible
+        or "voucher" in text
+        or "section 8" in text
+        or "section8" in text
+        or "affordable" in text
+        or "income restricted" in text
+        or "income-restricted" in text
+        or "accessibility" in text
+    )
+
+
+def _flexible_cross_provider_intent(intent: HousingSearchIntent | None) -> bool:
+    if not intent or _affordability_intent(intent):
+        return False
+    text = " ".join(
+        [
+            intent.intent_kind or "",
+            intent.keyword or "",
+            *intent.notes,
+            *intent.flexibility_notes,
+            *intent.property_types,
+            *intent.type_of_places,
+        ]
+    ).lower()
+    if len(intent.type_of_places) > 1:
+        return True
+    return any(
+        phrase in text
+        for phrase in (
+            "flexible",
+            "open",
+            "flat",
+            "apartment",
+            "studio",
+            "entire place",
+            "whole place",
+            "sublet",
+            "student_sublet",
+        )
+    )
 
 
 def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:

@@ -24,10 +24,25 @@ HARD_CONSTRAINT_FILTERS = (
     "washer_dryer",
     "wheelchair_accessible",
     "required_amenities",
-    "amenities",
-    "keyword",
     "avoid_neighborhoods",
 )
+
+VERIFICATION_FILTERS = (
+    "lease_length",
+    "move_in_date",
+    "move_out_date",
+    "campus_or_school",
+    "commute_target",
+    "preferred_amenities",
+    "neighborhoods",
+    "amenities",
+    "keyword",
+)
+
+FILTER_POLICY = {
+    **{name: "hard" for name in HARD_CONSTRAINT_FILTERS},
+    **{name: "verification" for name in VERIFICATION_FILTERS},
+}
 
 
 @dataclass(frozen=True)
@@ -95,7 +110,7 @@ def exclusion_reasons(
     intent: HousingSearchIntent,
     filter_names: Iterable[str],
 ) -> list[str]:
-    names = set(_normalize_filter_names(filter_names))
+    names = set(_normalize_filter_names(filter_names)) & set(HARD_CONSTRAINT_FILTERS)
     reasons: list[str] = []
 
     if "max_price" in names and intent.max_price is not None:
@@ -167,16 +182,6 @@ def exclusion_reasons(
         if text and not _contains_any(text, ("wheelchair", "accessible", "ada", "mobility")):
             reasons.append("wheelchair_accessible: accessibility was not found in listing text")
 
-    if "keyword" in names and intent.keyword:
-        keyword = intent.keyword.strip().lower()
-        if keyword and keyword not in text:
-            reasons.append(f"keyword: {intent.keyword!r} was not found in listing text")
-
-    if "lease_length" in names and intent.lease_length:
-        lease_length = intent.lease_length.strip().lower()
-        if lease_length and lease_length not in text:
-            reasons.append(f"lease_length: {intent.lease_length!r} was not found in listing text")
-
     required_terms = _required_terms(intent, names)
     for term in required_terms:
         if term.lower() not in text:
@@ -190,14 +195,56 @@ def exclusion_reasons(
 
 
 def _annotate_post_filter_notes(record: dict[str, Any], intent: HousingSearchIntent, filter_names: Sequence[str]) -> None:
-    if "commute_target" not in filter_names or not intent.commute_target:
-        return
     notes = list(record.get("post_filter_notes") or [])
-    if record.get("coordinates_status") == "present":
-        notes.append(f"Coordinates are present; commute to {intent.commute_target} still needs route-time verification.")
-    else:
-        notes.append(f"Coordinates missing; could not verify commute to {intent.commute_target}.")
-    record["post_filter_notes"] = list(dict.fromkeys(notes))
+    text = record_text(record)
+    names = set(_normalize_filter_names(filter_names))
+
+    if "lease_length" in names and intent.lease_length:
+        lease_length = intent.lease_length.strip().lower()
+        if lease_length and lease_length not in text:
+            notes.append(f"Lease length needs verification: {intent.lease_length}.")
+
+    if "move_in_date" in names and intent.move_in_date and not record.get("available_from_iso"):
+        notes.append(f"Move-in date needs verification: {intent.move_in_date}.")
+
+    if "move_out_date" in names and intent.move_out_date and not record.get("available_to_iso"):
+        notes.append(f"Move-out date needs verification: {intent.move_out_date}.")
+
+    if "campus_or_school" in names and intent.campus_or_school:
+        school = intent.campus_or_school.strip()
+        if school and school.lower() not in text:
+            notes.append(f"Campus proximity needs verification: {school}.")
+
+    if "commute_target" in names and intent.commute_target:
+        if record.get("coordinates_status") == "present":
+            notes.append(f"Coordinates are present; commute to {intent.commute_target} still needs route-time verification.")
+        else:
+            notes.append(f"Coordinates missing; could not verify commute to {intent.commute_target}.")
+
+    if "neighborhoods" in names and intent.neighborhoods:
+        missing = [value for value in intent.neighborhoods if value.strip() and value.strip().lower() not in text]
+        if missing:
+            notes.append(f"Neighborhood preference needs verification: {', '.join(missing)}.")
+
+    if "preferred_amenities" in names and intent.preferred_amenities:
+        missing = [value for value in intent.preferred_amenities if value.strip() and value.strip().lower() not in text]
+        if missing:
+            notes.append(f"Preferred amenities need verification: {', '.join(missing)}.")
+
+    if "amenities" in names and intent.amenities:
+        missing = [value for value in intent.amenities if value.strip() and value.strip().lower() not in text]
+        if missing:
+            notes.append(f"Amenities need verification: {', '.join(missing)}.")
+
+    if "keyword" in names and intent.keyword:
+        keyword = intent.keyword.strip()
+        if keyword and keyword.lower() not in text:
+            notes.append(f"Keyword needs verification: {keyword}.")
+
+    if notes:
+        unique_notes = list(dict.fromkeys(str(note).strip() for note in notes if str(note).strip()))
+        record["post_filter_notes"] = unique_notes
+        record["verification_notes"] = unique_notes
 
 
 def record_text(record: Mapping[str, Any]) -> str:
@@ -238,12 +285,11 @@ def _normalize_filter_names(filter_names: Iterable[str] | None) -> tuple[str, ..
         "pets": "pet_policy",
         "pet_friendly": "pet_policy",
         "neighborhoods": "neighborhoods",
+        "campus": "campus_or_school",
     }
     normalized: list[str] = []
     for name in filter_names:
         key = aliases.get(str(name), str(name))
-        if key == "amenities":
-            key = "required_amenities"
         if key not in normalized:
             normalized.append(key)
     return tuple(normalized)
@@ -303,7 +349,9 @@ def _contains_any(text: str, needles: Sequence[str]) -> bool:
 
 __all__ = [
     "HARD_CONSTRAINT_FILTERS",
+    "FILTER_POLICY",
     "PostFilterResult",
+    "VERIFICATION_FILTERS",
     "apply_hard_constraints",
     "apply_post_filters",
     "exclusion_reasons",

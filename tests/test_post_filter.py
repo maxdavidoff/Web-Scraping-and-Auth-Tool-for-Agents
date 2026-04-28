@@ -99,7 +99,7 @@ class PostFilterTests(unittest.TestCase):
         self.assertEqual([record["title"] for record in result.records], ["Has laundry"])
         self.assertEqual(result.excluded_records[0]["title"], "No mention")
 
-    def test_commute_target_is_noted_and_lease_length_can_filter(self) -> None:
+    def test_commute_target_and_lease_length_need_verification_without_excluding(self) -> None:
         result = apply_post_filters(
             [
                 {"title": "Summer sublet", "raw_text": "Summer lease near campus", "coordinates_status": "missing"},
@@ -109,9 +109,18 @@ class PostFilterTests(unittest.TestCase):
             ["commute_target", "lease_length"],
         )
 
-        self.assertEqual([record["title"] for record in result.records], ["Summer sublet"])
+        self.assertEqual([record["title"] for record in result.records], ["Summer sublet", "Annual lease"])
         self.assertIn("could not verify commute", result.records[0]["post_filter_notes"][0])
-        self.assertEqual(result.excluded_records[0]["title"], "Annual lease")
+        self.assertIn("Lease length needs verification", " ".join(result.records[1]["post_filter_notes"]))
+        self.assertEqual(result.excluded_records, [])
+
+    def test_sparse_intent_keeps_fetched_records_as_candidates(self) -> None:
+        records = [{"title": f"Listing {index}", "raw_text": "Sparse card"} for index in range(5)]
+
+        result = apply_post_filters(records, HousingSearchIntent(location="Boston"), ["lease_length"])
+
+        self.assertEqual(len(result.records), 5)
+        self.assertEqual(result.excluded_records, [])
 
 
 if __name__ == "__main__":

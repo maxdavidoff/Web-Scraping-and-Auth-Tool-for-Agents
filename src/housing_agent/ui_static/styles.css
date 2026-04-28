@@ -289,6 +289,16 @@ textarea {
   gap: 12px;
 }
 
+.filtered-details {
+  margin-top: 16px;
+}
+
+.filtered-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
 .provider-header,
 .listing-header,
 .artifact-header {

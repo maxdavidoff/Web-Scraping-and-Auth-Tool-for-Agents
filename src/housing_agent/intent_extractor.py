@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any, Mapping, Protocol, Sequence
 
 from .llm_client import DEFAULT_MISTRAL_MODEL, MistralChatClient
+from .intent_guards import apply_intent_guards
 from .location_scope import is_neighborhood_only_location
 from .query_planner import plan_query
 from .types import HousingSearchIntent, QueryPlan
@@ -189,6 +190,7 @@ def extract_housing_intent(
     raw = parse_json_object(response_text)
     intent = intent_from_mapping(raw)
     intent = _apply_location_scope_guards(intent)
+    intent = apply_intent_guards(intent, latest_user_message=user_request)
     query_plan = plan_query(intent, providers=providers)
     return IntentExtractionResult(
         intent=intent,
@@ -222,6 +224,11 @@ def update_housing_intent(
     )
     intent = intent_from_mapping(raw)
     intent = _apply_location_scope_guards(intent, previous_intent=previous)
+    intent = apply_intent_guards(
+        intent,
+        latest_user_message=latest_user_message,
+        transcript=transcript,
+    )
     query_plan = plan_query(intent, providers=providers)
     return IntentExtractionResult(
         intent=intent,

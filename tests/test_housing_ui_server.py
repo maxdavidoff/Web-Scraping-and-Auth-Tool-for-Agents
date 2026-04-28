@@ -49,6 +49,8 @@ class HousingUiServerTests(unittest.TestCase):
         self.assertIn("renderDebugMessage", app)
         self.assertIn("buildRankingIndex", app)
         self.assertIn("execution?.records", app)
+        self.assertIn("execution?.excluded_records", app)
+        self.assertIn("Filtered out", app)
 
     def test_turn_to_response_keeps_debug_message_and_concises_confirmation(self) -> None:
         response = turn_to_response(
@@ -118,6 +120,25 @@ class HousingUiServerTests(unittest.TestCase):
         self.assertNotIn("https://", response["turn"]["message"])
         self.assertNotIn("data/raw", response["turn"]["message"])
         self.assertIn("https://liveohana.ai/listing/example", response["turn"]["debug_message"])
+
+    def test_turn_to_response_mentions_fetched_candidates_when_only_excluded_records_exist(self) -> None:
+        response = turn_to_response(
+            AgentTurn(
+                state="executed",
+                message="Search execution finished with filtered records.",
+                json_payload={
+                    "state": "executed",
+                    "execution_result": {
+                        "records": [],
+                        "excluded_records": [{"title": "Needs review"}],
+                        "hard_excluded_records": [{"title": "Too expensive"}],
+                    },
+                },
+            )
+        )
+
+        self.assertIn("fetched listing candidate", response["turn"]["message"])
+        self.assertNotIn("did not find", response["turn"]["message"].lower())
 
     def test_resolve_artifact_path_allows_only_configured_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

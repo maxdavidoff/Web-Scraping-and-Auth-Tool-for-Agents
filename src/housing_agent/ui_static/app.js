@@ -266,8 +266,17 @@ function renderListings(payload) {
   const ranking = payload.listing_ranking;
   const execution = payload.execution_result;
   const records = execution?.records || [];
-  if (!records.length) {
+  const excludedRecords = [
+    ...((execution?.excluded_records || []).map((record) => ({ ...record, rank_bucket: record.rank_bucket || "excluded" }))),
+    ...((execution?.hard_excluded_records || []).map((record) => ({ ...record, rank_bucket: record.rank_bucket || "excluded" }))),
+  ];
+  const allFetched = [...records, ...excludedRecords];
+  if (!execution) {
     setMuted(listingsPanel, "No listings yet.");
+    return;
+  }
+  if (!allFetched.length) {
+    setMuted(listingsPanel, "No listings fetched for this search.");
     return;
   }
   listingsPanel.classList.remove("muted");
@@ -276,8 +285,12 @@ function renderListings(payload) {
   if (ranking?.overall_summary) wrapper.append(paragraph(ranking.overall_summary));
   const list = document.createElement("div");
   list.className = "cards-grid";
-  list.append(...records.map((record) => recordCard(mergeRanking(record, rankingIndex))));
+  const visibleRecords = rankVisibleRecords(records.map((record) => mergeRanking(record, rankingIndex))).slice(0, 5);
+  list.append(...visibleRecords.map((record) => recordCard(record)));
   wrapper.append(list);
+  if (records.length > visibleRecords.length) {
+    wrapper.append(paragraph(`${records.length - visibleRecords.length} additional fetched listing(s) are available in the debug data.`));
+  }
   const unmatchedRanked = unmatchedRankedListings(ranking, records);
   if (unmatchedRanked.length) {
     const extra = document.createElement("section");
@@ -285,6 +298,19 @@ function renderListings(payload) {
     heading.textContent = "Additional ranking notes";
     extra.append(heading, ...unmatchedRanked.map((listing) => recordCard(listing)));
     wrapper.append(extra);
+  }
+  if (excludedRecords.length) {
+    const details = document.createElement("details");
+    details.className = "filtered-details";
+    const summary = document.createElement("summary");
+    summary.textContent = `Filtered out (${excludedRecords.length})`;
+    details.append(summary);
+    const filtered = document.createElement("div");
+    filtered.className = "cards-grid";
+    filtered.append(...excludedRecords.slice(0, 5).map((record) => recordCard(record)));
+    details.append(filtered);
+    if (excludedRecords.length > 5) details.append(paragraph(`${excludedRecords.length - 5} more filtered listing(s) hidden.`));
+    wrapper.append(details);
   }
   if ((ranking?.followup_suggestions || []).length) wrapper.append(listBlock("Useful next checks", ranking.followup_suggestions));
   listingsPanel.replaceChildren(wrapper);
@@ -316,9 +342,13 @@ function recordCard(record) {
   ].filter(Boolean);
   if (facts.length) card.append(factRow(facts));
   if (record.why_it_fits) card.append(paragraph(record.why_it_fits));
+  const verificationNotes = record.verification_notes || record.post_filter_notes || [];
+  if (verificationNotes.length) card.append(listBlock("Needs verification", verificationNotes));
   if ((record.matched_constraints || []).length) card.append(listBlock("Matched", record.matched_constraints));
   if ((record.missing_info || []).length) card.append(listBlock("Missing info", record.missing_info));
   if ((record.concerns || []).length) card.append(listBlock("Concerns", record.concerns));
+  if ((record.excluded_reasons || []).length) card.append(listBlock("Filtered out", record.excluded_reasons));
+  else if (record.excluded_reason) card.append(listBlock("Filtered out", [record.excluded_reason]));
   if (url) card.append(linkLine("Listing", url, url));
   const images = imageValues(record.image_urls || record.images || []);
   if (images.length) card.append(imageStrip(images));
@@ -344,10 +374,28 @@ function buildRankingIndex(ranking) {
 function mergeRanking(record, rankingIndex) {
   for (const key of listingKeys(record)) {
     if (rankingIndex.has(key)) {
-      return { ...record, ...rankingIndex.get(key), raw: record };
+      return normalizeVerificationBucket({ ...record, ...rankingIndex.get(key), raw: record });
     }
   }
+  return normalizeVerificationBucket(record);
+}
+
+function normalizeVerificationBucket(record) {
+  const notes = record.verification_notes || record.post_filter_notes || [];
+  if (notes.length && record.rank_bucket !== "excluded") {
+    return { ...record, rank_bucket: "needs_verification" };
+  }
   return record;
+}
+
+function rankVisibleRecords(records) {
+  const bucketOrder = { recommended: 0, needs_verification: 1, excluded: 2 };
+  return [...records].sort((left, right) => {
+    const leftBucket = bucketOrder[left.rank_bucket] ?? 1;
+    const rightBucket = bucketOrder[right.rank_bucket] ?? 1;
+    if (leftBucket !== rightBucket) return leftBucket - rightBucket;
+    return Number(right.fit_score || 0) - Number(left.fit_score || 0);
+  });
 }
 
 function unmatchedRankedListings(ranking, records) {
@@ -521,8 +569,10 @@ function artifactUrl(path) {
 
 function summaryText(intent, execution) {
   const records = execution?.records || [];
+  const excluded = [...(execution?.excluded_records || []), ...(execution?.hard_excluded_records || [])];
   if (records.length === 1) return "I found 1 listing for this search.";
   if (records.length) return `I found ${records.length} listings for this search.`;
+  if (excluded.length) return `I found ${excluded.length} fetched candidate(s) that need review.`;
   const location = intent.location || "your target area";
   const budget = priceRange(intent);
   const place = join(intent.type_of_places) || join(intent.property_types) || "housing";

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from src.housing_agent.interactive_agent import InteractiveHousingAgent
+from src.housing_agent.interactive_agent import BACKUP_PROVIDER_SCORE_RATIO, InteractiveHousingAgent
 from src.housing_agent.types import ListingRankingResult, RankedListing, SearchReadiness
 
 
@@ -47,6 +47,40 @@ def fake_router_result(records: list[dict] | None = None, errors: dict[str, str]
         )
     ]
     return SimpleNamespace(provider_results=provider_results, records=records, errors=errors)
+
+
+def fake_multi_provider_result(records: list[dict] | None = None):
+    records = records or [
+        {"provider": "ohana", "title": "Ohana room", "price": "$1,800", "raw_text": "Private room"},
+        {"provider": "rentalsource", "title": "RentalSource studio", "price": "$2,700", "raw_text": "Studio apartment"},
+    ]
+    provider_results = [
+        SimpleNamespace(
+            provider="ohana",
+            status="ok",
+            error="",
+            search_url="https://liveohana.ai/sublet/boston",
+            records=[record for record in records if record.get("provider") == "ohana"],
+            raw_output=Path("data/raw/ohana.jsonl"),
+            csv_output=Path("data/processed/ohana.csv"),
+            debug_artifacts={},
+            excluded_records=[],
+            exclusion_counts={},
+        ),
+        SimpleNamespace(
+            provider="rentalsource",
+            status="ok",
+            error="",
+            search_url="https://www.rentalsource.com/boston-ma/",
+            records=[record for record in records if record.get("provider") == "rentalsource"],
+            raw_output=Path("data/raw/rentalsource.jsonl"),
+            csv_output=Path("data/processed/rentalsource.csv"),
+            debug_artifacts={},
+            excluded_records=[],
+            exclusion_counts={},
+        ),
+    ]
+    return SimpleNamespace(provider_results=provider_results, records=records, excluded_records=[], exclusion_counts={}, errors={})
 
 
 def ready_readiness(intent, **kwargs):
@@ -106,6 +140,9 @@ def fake_listing_ranker(intent, readiness, records, **kwargs):
 
 
 class InteractiveHousingAgentTests(unittest.TestCase):
+    def test_backup_provider_threshold_is_pinned(self) -> None:
+        self.assertEqual(BACKUP_PROVIDER_SCORE_RATIO, 0.60)
+
     def test_missing_location_triggers_clarification(self) -> None:
         agent = InteractiveHousingAgent(
             client=FakeJsonClient(
@@ -395,6 +432,86 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_listings"], 5)
         self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource", "ohana"))
+
+    def test_failing_upenn_to_boston_transcript_keeps_broad_candidates_visible(self) -> None:
+        runner = Mock(return_value=fake_multi_provider_result())
+        ranker = Mock(side_effect=fake_listing_ranker)
+        agent = InteractiveHousingAgent(
+            client=FakeJsonClient(
+                [
+                    {
+                        "location": "University of Pennsylvania, Philadelphia, PA",
+                        "campus_or_school": "UPenn",
+                        "intent_kind": "student_sublet",
+                        "lease_length": "summer",
+                    },
+                    {
+                        "location": "University of Pennsylvania, Philadelphia, PA",
+                        "campus_or_school": "UPenn",
+                        "intent_kind": "student_sublet",
+                        "type_of_places": ["Private room"],
+                        "flexibility_notes": ["budget_open"],
+                    },
+                    {
+                        "location": "University of Pennsylvania, Philadelphia, PA",
+                        "campus_or_school": "UPenn",
+                        "min_price": 3000,
+                        "max_price": 3000,
+                        "intent_kind": "student_sublet",
+                        "type_of_places": ["Private room"],
+                        "move_in_date": "2026-06-01",
+                        "move_out_date": "2026-08-01",
+                    },
+                    {
+                        "location": "Boston",
+                        "campus_or_school": "Boston University",
+                        "min_price": 3000,
+                        "max_price": 3000,
+                        "intent_kind": "student_sublet",
+                        "type_of_places": ["Private room", "Shared room", "Entire place"],
+                        "move_in_date": "2026-06-01",
+                        "move_out_date": "2026-08-01",
+                    },
+                    {
+                        "location": "Boston",
+                        "campus_or_school": "Boston University",
+                        "min_price": 3000,
+                        "max_price": 3000,
+                        "bedrooms": 1,
+                        "intent_kind": "student_sublet",
+                        "type_of_places": ["Private room", "Shared room", "Entire place"],
+                        "move_in_date": "2026-06-01",
+                        "move_out_date": "2026-08-01",
+                        "notes": [
+                            "The flat itself can have more than one bedroom if it is a sublet.",
+                        ],
+                    },
+                ]
+            ),
+            runner=runner,
+            readiness_evaluator=ready_readiness,
+            listing_ranker=ranker,
+            max_listings=5,
+        )
+
+        agent.handle_user_message("i need a flat this summer for a program im taking at Upenn")
+        agent.handle_user_message("no budget, i want a private room.")
+        agent.handle_user_message("3k a month, 1st june to 1st aug")
+        agent.handle_user_message("ok lets look for listings in Boston instead for the same dates and preferences.")
+        confirmation = agent.handle_user_message(
+            "just the one bedroom for myself but the flat itself can of course have more than one bedroom if its a sublet. "
+            "its only for me for 3k a month is my budget"
+        )
+        execution = agent.handle_user_message("yes")
+
+        self.assertEqual(confirmation.state, "execution_confirmation_requested")
+        self.assertEqual(agent.current_intent.max_price, 3000)
+        self.assertIsNone(agent.current_intent.min_price)
+        self.assertIsNone(agent.current_intent.bedrooms)
+        self.assertEqual(runner.call_args.kwargs["providers"], ("ohana", "rentalsource"))
+        self.assertEqual(execution.state, "executed")
+        self.assertEqual(len(agent.latest_execution_result.records), 2)
+        self.assertEqual(len(ranker.call_args.args[2]), 2)
 
     def test_execute_command_repeats_agent_led_confirmation(self) -> None:
         runner = Mock(return_value=fake_router_result())

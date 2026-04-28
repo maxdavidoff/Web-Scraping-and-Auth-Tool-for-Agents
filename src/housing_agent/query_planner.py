@@ -175,6 +175,7 @@ def score_provider_query(
 def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
     filters: dict[str, Any] = {}
     _add_if_value(filters, "location", intent.location)
+    _add_if_value(filters, "neighborhoods", intent.neighborhoods)
     _add_if_value(filters, "min_price", intent.min_price)
     _add_if_value(filters, "max_price", intent.max_price)
     _add_if_value(filters, "bedrooms", intent.bedrooms)
@@ -192,6 +193,7 @@ def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
     _add_if_value(filters, "move_out_date", intent.move_out_date)
     amenities = _unique_strings((*intent.amenities, *intent.required_amenities, *intent.preferred_amenities))
     _add_if_value(filters, "amenities", amenities)
+    _add_if_value(filters, "preferred_amenities", intent.preferred_amenities)
     _add_if_value(filters, "sort", intent.sort)
     _add_if_value(filters, "map_bounds", intent.map_bounds)
     if intent.photos:
@@ -215,6 +217,7 @@ def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
     _add_if_value(filters, "required_amenities", intent.required_amenities)
     _add_if_value(filters, "avoid_neighborhoods", intent.avoid_neighborhoods)
     _add_if_value(filters, "lease_length", intent.lease_length)
+    _add_if_value(filters, "campus_or_school", intent.campus_or_school)
     _add_if_value(filters, "commute_target", intent.commute_target)
     return filters
 

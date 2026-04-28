@@ -186,11 +186,16 @@ def user_facing_message(turn: AgentTurn, payload: dict[str, Any]) -> str:
     if state == "executed":
         execution = payload.get("execution_result") or {}
         records = execution.get("records") or []
+        excluded_records = execution.get("excluded_records") or []
+        hard_excluded_records = execution.get("hard_excluded_records") or []
         count = len(records)
         if count == 1:
             return "I found 1 listing. I put the match and verification notes on the right."
         if count:
             return f"I found {count} listings. I put the matches and verification notes on the right."
+        if excluded_records or hard_excluded_records:
+            total = len(excluded_records) + len(hard_excluded_records)
+            return f"I found {total} fetched listing candidate(s), but they need verification or were filtered out. I put the details on the right."
         return "I did not find listings for that search. I put the provider status and next checks on the right."
     if state == "reset":
         return "Reset complete. What are you looking for?"

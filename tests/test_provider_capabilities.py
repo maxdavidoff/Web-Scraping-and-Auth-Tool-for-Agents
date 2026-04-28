@@ -31,7 +31,7 @@ class ProviderCapabilityMatrixTests(unittest.TestCase):
         self.assertEqual(ohana.filters["location"].category, SupportCategory.PATH_SEGMENT)
         self.assertTrue(ohana.filters["type_of_places"].verified)
         self.assertTrue(ohana.filters["furnished"].verified)
-        self.assertEqual(ohana.filters["move_in_date"].category, SupportCategory.UNKNOWN)
+        self.assertEqual(ohana.filters["move_in_date"].category, SupportCategory.QUERY_PARAM)
         self.assertFalse(ohana.filters["move_in_date"].verified)
 
     def test_rentalsource_has_verified_query_param_targeting(self) -> None:
