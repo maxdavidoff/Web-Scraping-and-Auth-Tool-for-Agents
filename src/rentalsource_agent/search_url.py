@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 RENTALSOURCE_BASE_URL = "https://www.rentalsource.com"
 
@@ -38,10 +38,19 @@ SORT_MAP = {
     "popular": "popular",
 }
 
+CATEGORY_PATH_MAP = {
+    "apt": "apartments",
+    "hous": "houses",
+}
+
 
 def slugify_location(location: str) -> str:
     """
     Convert locations like 'Boston, MA, USA' to RentalSource path slugs.
+
+    City/state/ZIP locations use the known canonical city ZIP shape, e.g.
+    'Boston, MA 02118' -> 'boston-ma-02118'. Plain ZIP inputs stay as the
+    ZIP path because a city mapping is required for the canonical city slug.
 
     For ambiguous values, pass --search-url directly.
     """
@@ -49,10 +58,20 @@ def slugify_location(location: str) -> str:
     if not location:
         raise ValueError("Location cannot be empty.")
 
+    parsed = urlparse(location)
+    if parsed.scheme and parsed.netloc:
+        raise ValueError("slugify_location expects a location, not a URL.")
+
     if re.fullmatch(r"\d{5}", location):
         return location
 
     parts = [part.strip() for part in location.split(",") if part.strip()]
+    if len(parts) >= 2:
+        state_zip = parts[1].split()
+        if len(state_zip) >= 2 and re.fullmatch(r"[A-Za-z]{2}", state_zip[0]) and re.fullmatch(r"\d{5}", state_zip[1]):
+            city_slug = re.sub(r"[^a-z0-9]+", "-", parts[0].lower()).strip("-")
+            return f"{city_slug}-{state_zip[0].lower()}-{state_zip[1]}"
+
     if len(parts) >= 2 and re.fullmatch(r"[A-Za-z]{2}", parts[1]):
         city = parts[0]
         state = parts[1].lower()
@@ -67,8 +86,19 @@ def _type_code(property_type: str) -> str:
     return TYPE_PARAM_MAP.get(key, key)
 
 
+def _category_path(property_types: list[str] | None) -> str:
+    codes = [
+        _type_code(property_type)
+        for property_type in property_types or []
+        if _type_code(property_type) and _type_code(property_type) != "all"
+    ]
+    if len(codes) == 1:
+        return CATEGORY_PATH_MAP.get(codes[0], "")
+    return ""
+
+
 def build_rentalsource_search_url(
-    location: str,
+    location: str | None = None,
     property_types: list[str] | None = None,
     num_bedrooms: int | None = None,
     num_bathrooms: float | None = None,
@@ -80,9 +110,24 @@ def build_rentalsource_search_url(
     featured: bool = False,
     sort: str | None = None,
     page: int | None = None,
+    search_url: str | None = None,
 ) -> str:
+    if search_url:
+        return search_url
+
+    if not location:
+        raise ValueError("Provide either search_url or location.")
+
+    parsed = urlparse(location)
+    if parsed.scheme and parsed.netloc:
+        return location
+
     slug = slugify_location(location)
-    base_url = f"{RENTALSOURCE_BASE_URL}/{slug}/"
+    category_path = _category_path(property_types)
+    if category_path:
+        base_url = f"{RENTALSOURCE_BASE_URL}/{slug}/{category_path}/"
+    else:
+        base_url = f"{RENTALSOURCE_BASE_URL}/{slug}/"
     params: list[tuple[str, str]] = []
 
     if min_price is not None:

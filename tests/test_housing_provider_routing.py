@@ -84,6 +84,56 @@ class HousingProviderRoutingTests(unittest.TestCase):
         self.assertEqual(result.search.provider_results[0].provider, "rentalsource")
         run_rentalsource.assert_called_once()
 
+    def test_rentalsource_router_passes_full_url_filters_and_reports_them(self) -> None:
+        plan = StudentHousingSearchPlan(
+            location="Boston, MA",
+            providers=["rentalsource"],
+            property_types=["Apartment"],
+            num_bedrooms=2,
+            num_bathrooms=1.5,
+            min_price=1200,
+            max_price=3400,
+            pet_policy=["dogs"],
+            photos=True,
+            verified=True,
+            featured=True,
+            sort="price-high",
+            page=2,
+            max_listings=2,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
+                with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
+                    run_rentalsource.return_value = fake_result(
+                        "rentalsource",
+                        [{"source": "rentalsource", "title": "Filtered apartment"}],
+                        tmpdir,
+                    )
+
+                    result = run_student_housing_agent(
+                        "Find a verified Boston apartment with photos",
+                        summarize=False,
+                    )
+
+        options = run_rentalsource.call_args.args[0]
+        self.assertEqual(options.num_bathrooms, 1.5)
+        self.assertTrue(options.pets)
+        self.assertTrue(options.photos)
+        self.assertTrue(options.verified)
+        self.assertTrue(options.featured)
+        self.assertEqual(options.sort, "price-high")
+        self.assertEqual(options.page, 2)
+
+        provider_result = result.search.provider_results[0]
+        self.assertEqual(provider_result.query_quality["status"], "source_applied")
+        self.assertIn("num_bathrooms", provider_result.filter_application["source_applied"])
+        self.assertIn("photos", provider_result.filter_application["source_applied"])
+        self.assertIn("verified", provider_result.filter_application["source_applied"])
+        self.assertIn("featured", provider_result.filter_application["source_applied"])
+        self.assertIn("sort", provider_result.filter_application["source_applied"])
+        self.assertIn("page", provider_result.filter_application["source_applied"])
+
     def test_affordablehousing_can_be_selected_by_plan_through_main_flow(self) -> None:
         plan = StudentHousingSearchPlan(
             location="Boston, MA",
@@ -113,6 +163,35 @@ class HousingProviderRoutingTests(unittest.TestCase):
         self.assertEqual(result.search.records[0]["provider"], "affordablehousing")
         self.assertEqual(result.search.provider_results[0].status, "ok")
         run_affordable.assert_called_once()
+
+    def test_affordablehousing_report_does_not_mark_min_price_source_applied(self) -> None:
+        plan = StudentHousingSearchPlan(
+            location="Boston, MA",
+            providers=["affordablehousing"],
+            min_price=900,
+            max_price=1800,
+            max_listings=2,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
+                with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                    run_affordable.return_value = fake_result(
+                        "affordablehousing",
+                        [{"source": "affordablehousing", "title": "Affordable unit"}],
+                        tmpdir,
+                    )
+
+                    result = run_student_housing_agent(
+                        "Find affordable housing from 900 to 1800 in Boston",
+                        summarize=False,
+                    )
+
+        provider_result = result.search.provider_results[0]
+        self.assertIn("max_price", provider_result.filter_application["source_applied"])
+        self.assertNotIn("min_price", provider_result.filter_application["source_applied"])
+        self.assertIn("min_price", provider_result.filter_application["not_source_applied"])
+        self.assertEqual(provider_result.query_quality["status"], "partial")
 
     def test_multi_provider_search_keeps_successes_when_one_empty_and_one_errors(self) -> None:
         plan = StudentHousingSearchPlan(

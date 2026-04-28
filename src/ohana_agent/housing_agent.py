@@ -23,10 +23,16 @@ class StudentHousingSearchPlan:
     property_types: list[str] | None = None
     type_of_places: list[str] | None = None
     num_bedrooms: int | None = None
+    num_bathrooms: float | None = None
     min_price: int | None = None
     max_price: int | None = None
     pet_policy: list[str] | None = None
     furnished_status: list[str] | None = None
+    photos: bool = False
+    verified: bool = False
+    featured: bool = False
+    sort: str | None = None
+    page: int | None = None
     max_listings: int = 10
     notes: list[str] | None = None
     assumptions: list[str] | None = None
@@ -54,8 +60,9 @@ You plan housing searches for students across these providers:
 
 Convert the student's request into one JSON object with exactly these keys:
 providers, location, movein, moveout, property_types, type_of_places,
-num_bedrooms, min_price, max_price, pet_policy, furnished_status,
-max_listings, notes, assumptions.
+num_bedrooms, num_bathrooms, min_price, max_price, pet_policy,
+furnished_status, photos, verified, featured, sort, page, max_listings,
+notes, assumptions.
 
 Rules:
 - providers is a list containing any of: "ohana", "rentalsource", "affordablehousing".
@@ -68,7 +75,11 @@ Rules:
 - Use null when the student did not specify a filter.
 - property_types can include values such as 'Apartment' or 'House'.
 - type_of_places can include values such as 'Private room', 'Shared room', or 'Entire place'.
+- num_bathrooms is mainly for RentalSource. Use null when not specified.
 - pet_policy and furnished_status should be lists only when explicitly requested.
+- photos, verified, and featured are RentalSource-only boolean filters. Use false unless explicitly requested.
+- sort can be a RentalSource sort such as 'relevance', 'verified', 'price', 'price-high', 'newest', 'updated', or 'popular'.
+- page is a RentalSource result page number. Use null when not specified.
 - Convert budgets like 'under 1800' into max_price.
 - If the student wants to sublet a room alone, prefer type_of_places like 'Private room' or 'Shared room' when stated.
 - If the student wants a longer lease with friends, capture the friend count/group size in notes and use num_bedrooms when clear.
@@ -193,6 +204,30 @@ def _optional_int(value: Any, *, minimum: int | None = None, maximum: int | None
     return number
 
 
+def _optional_float(value: Any, *, minimum: float | None = None, maximum: float | None = None) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if minimum is not None:
+        number = max(number, minimum)
+    if maximum is not None:
+        number = min(number, maximum)
+    return number
+
+
+def _optional_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def _optional_string_list(value: Any) -> list[str] | None:
     if value is None or value == "":
         return None
@@ -234,10 +269,16 @@ def _plan_from_dict(data: dict[str, Any]) -> StudentHousingSearchPlan:
         property_types=_optional_string_list(data.get("property_types")),
         type_of_places=_optional_string_list(data.get("type_of_places")),
         num_bedrooms=_optional_int(data.get("num_bedrooms"), minimum=0),
+        num_bathrooms=_optional_float(data.get("num_bathrooms"), minimum=0),
         min_price=_optional_int(data.get("min_price"), minimum=0),
         max_price=_optional_int(data.get("max_price"), minimum=0),
         pet_policy=_optional_string_list(data.get("pet_policy")),
         furnished_status=_optional_string_list(data.get("furnished_status")),
+        photos=_optional_bool(data.get("photos")),
+        verified=_optional_bool(data.get("verified")),
+        featured=_optional_bool(data.get("featured")),
+        sort=_optional_string(data.get("sort")),
+        page=_optional_int(data.get("page"), minimum=1),
         max_listings=_optional_int(data.get("max_listings"), minimum=1, maximum=50) or 10,
         notes=_optional_string_list(data.get("notes")),
         assumptions=_optional_string_list(data.get("assumptions")),
