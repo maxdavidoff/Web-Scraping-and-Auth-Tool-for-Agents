@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from src.rentalsource_agent.detail import (
     enrich_record_with_detail,
     extract_detail_data,
     find_real_estate_listing,
+    is_allowed_detail_url,
     parse_json_ld_documents,
 )
 from src.rentalsource_agent.extractor import extract_listings
@@ -223,6 +225,16 @@ class RentalSourceParsingTests(unittest.TestCase):
 
 
 class RentalSourceDetailTests(unittest.TestCase):
+    def test_allowed_detail_url_requires_https_rentalsource_detail_page(self) -> None:
+        self.assertTrue(
+            is_allowed_detail_url(
+                "https://www.rentalsource.com/details/770-boylston-st-boston-ma-83402038/"
+            )
+        )
+        self.assertFalse(is_allowed_detail_url("http://www.rentalsource.com/details/insecure/"))
+        self.assertFalse(is_allowed_detail_url("https://evil.example/details/770-boylston/"))
+        self.assertFalse(is_allowed_detail_url("javascript:https://www.rentalsource.com/details/770/"))
+
     def test_extract_detail_data_reads_real_estate_listing_json_ld(self) -> None:
         document = {"@graph": [{"@type": "BreadcrumbList"}, DETAIL_LISTING]}
         html = html_with_json_ld("{not valid json", document)
@@ -295,6 +307,15 @@ class RentalSourceDetailTests(unittest.TestCase):
         self.assertEqual(enriched["listing_detail_status"], "failed")
         self.assertIn("503", enriched["listing_detail_error"])
 
+    def test_enrich_record_with_detail_does_not_fetch_untrusted_detail_url(self) -> None:
+        page = FakePageWithRequest(FakeResponse(html_with_json_ld(DETAIL_LISTING)))
+        record = {"url": "https://evil.example/details/770-boylston-st-boston-ma-83402038/"}
+
+        enriched = enrich_record_with_detail(page=page, record=record)
+
+        self.assertEqual(enriched["listing_detail_status"], "skipped_invalid_detail_url")
+        self.assertEqual(page.request.urls, [])
+
 
 class RentalSourceExtractorTests(unittest.TestCase):
     def test_extract_listings_falls_back_to_json_ld_item_list_and_dedupes(self) -> None:
@@ -347,6 +368,10 @@ class RentalSourceExtractorTests(unittest.TestCase):
 
 
 class RentalSourceLiveBrowserScrapeTests(unittest.TestCase):
+    @unittest.skipUnless(
+        os.getenv("RUN_LIVE_SCRAPE_TESTS") == "1",
+        "Set RUN_LIVE_SCRAPE_TESTS=1 to run live RentalSource scrape tests",
+    )
     def test_live_browser_scrape_extracts_and_enriches_rentalsource_listing(self) -> None:
         try:
             from playwright.sync_api import Error as PlaywrightError

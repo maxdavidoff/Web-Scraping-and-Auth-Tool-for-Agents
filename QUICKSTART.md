@@ -8,7 +8,8 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-Run the automated tests, including live browser scrape coverage:
+Run the automated tests. Live browser scrape tests are skipped unless you set
+`RUN_LIVE_SCRAPE_TESTS=1`:
 
 ```bash
 python3 -m unittest discover -s tests -v

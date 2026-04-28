@@ -281,12 +281,18 @@ and log in again.
 
 ## Automated tests
 
-Run the automated tests, including the live browser scrape tests, with:
+Run the automated tests with:
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m playwright install chromium
 python3 -m unittest discover -s tests -v
+```
+
+Live browser scrape tests are skipped by default. To opt in:
+
+```bash
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
 ## AffordableHousing.com tool

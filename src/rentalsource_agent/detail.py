@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -15,6 +16,16 @@ JSON_LD_RE = re.compile(
     r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
     re.I | re.S,
 )
+ALLOWED_DETAIL_HOSTS = {"www.rentalsource.com", "rentalsource.com"}
+
+
+def is_allowed_detail_url(detail_url: str) -> bool:
+    parsed = urlparse(detail_url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in ALLOWED_DETAIL_HOSTS
+        and parsed.path.startswith("/details/")
+    )
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -171,6 +182,9 @@ def extract_detail_data(listing: dict) -> dict:
 
 
 def fetch_listing_detail_data(page: "Page", detail_url: str) -> dict:
+    if not is_allowed_detail_url(detail_url):
+        raise ValueError(f"Refusing to fetch non-RentalSource detail URL: {detail_url}")
+
     response = page.request.get(detail_url)
 
     if not response.ok:
@@ -191,8 +205,11 @@ def enrich_record_with_detail(
     debug_dir: Path | None = None,
 ) -> dict:
     detail_url = record.get("detail_url") or record.get("url")
-    if not detail_url or "/details/" not in str(detail_url):
+    if not detail_url:
         record["listing_detail_status"] = "skipped_no_detail_url"
+        return record
+    if not is_allowed_detail_url(str(detail_url)):
+        record["listing_detail_status"] = "skipped_invalid_detail_url"
         return record
 
     try:

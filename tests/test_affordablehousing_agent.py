@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
@@ -267,6 +268,10 @@ class AffordableHousingLiveBrowserScrapeTests(unittest.TestCase):
                 self.assertNotIn("javascript:", record["url"].lower())
                 self.assertNotIn("Stud-", record["bedrooms"])
 
+    @unittest.skipUnless(
+        os.getenv("RUN_LIVE_SCRAPE_TESTS") == "1",
+        "Set RUN_LIVE_SCRAPE_TESTS=1 to run live AffordableHousing scrape tests",
+    )
     @unittest.skipIf(sync_playwright is None, "Playwright is required for live browser scrape tests")
     def test_live_browser_extracts_records_from_public_results_page(self) -> None:
         selectors = load_selectors(PROJECT_ROOT / "selectors.affordablehousing.json")
@@ -289,6 +294,10 @@ class AffordableHousingLiveBrowserScrapeTests(unittest.TestCase):
 
         self.assert_valid_live_records(records, expected_count=3)
 
+    @unittest.skipUnless(
+        os.getenv("RUN_LIVE_SCRAPE_TESTS") == "1",
+        "Set RUN_LIVE_SCRAPE_TESTS=1 to run live AffordableHousing CLI scrape tests",
+    )
     def test_live_cli_scrape_writes_jsonl_records(self) -> None:
         command = [
             sys.executable,
