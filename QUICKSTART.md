@@ -41,19 +41,6 @@ data/raw/
 data/debug/
 ```
 
-Run the LLM student-housing agent:
-
-```bash
-export OPENAI_API_KEY="..."
-python run_housing_agent.py --max-listings 10
-```
-
-Or seed the intake with an initial request:
-
-```bash
-python run_housing_agent.py "furnished private room near Northeastern under $1800" --max-listings 10
-```
-
 AffordableHousing.com:
 
 ```bash

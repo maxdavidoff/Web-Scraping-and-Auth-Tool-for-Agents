@@ -1,6 +1,6 @@
 # Ohana Search Agent — Simple Playwright Starter
 
-This is a small, test-first browser automation project for logging into Ohana with your own account, running a search, extracting visible listing-card information, and saving results to files. It also includes a lightweight LLM planner that can turn a student's natural-language housing request into an Ohana search, run the scraper, and summarize the results.
+This is a small, test-first browser automation project for logging into housing providers with your own account when needed, running searches, extracting visible listing-card information, and saving results to files. It also includes a deterministic provider capability and query-planning layer that reports which filters each provider can apply before scraping.
 
 It intentionally does **not** bypass Cloudflare, CAPTCHAs, login protections, private APIs, or rate limits. Use it only with an account you are allowed to use and only at low, human-like volume.
 
@@ -31,18 +31,22 @@ ohana_search_agent/
     processed/                    # CSV results
     debug/                        # screenshot + HTML snapshots
 
+  src/housing_agent/
+    provider_capabilities.py      # provider capability matrix
+    query_planner.py              # deterministic query planning/reporting
+    types.py                      # shared query-planning dataclasses
+
   src/ohana_agent/
     browser.py                    # Playwright browser/session helpers
     config.py                     # settings and paths
     extractor.py                  # DOM extraction logic
-    housing_agent.py              # LLM planner + student-facing result summary
+    provider_router.py            # deterministic multi-provider router
     parsing.py                    # field normalization / regex guesses
     search_runner.py              # importable Ohana scraping tool
     storage.py                    # JSONL + CSV writers
 
   save_ohana_login.py             # Step 1: save login session
   run_ohana_search.py             # Step 2: run/extract search
-  run_housing_agent.py            # LLM student-housing agent
   selectors.example.json          # editable selectors
   requirements.txt
   .env.example
@@ -64,13 +68,6 @@ Optional: copy `.env.example` to `.env` and edit defaults:
 
 ```bash
 cp .env.example .env
-```
-
-For the LLM student-housing agent, set:
-
-```bash
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4.1-mini
 ```
 
 ## Step 1 — Save your Ohana login session
@@ -139,60 +136,28 @@ PYTHONPATH=src python -u run_ohana_search.py \
 
 If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
 
-## Step 4 — Run the student housing agent
+## Query planning layer
 
-After your Ohana login session is saved, start the intake flow:
-
-```bash
-python run_housing_agent.py --max-listings 10 --fetch-listing-api
-```
-
-The agent will:
-
-1. Ask what the student is looking for.
-2. Ask follow-up questions to refine the search.
-3. Clarify whether this is a solo room/sublet search or a longer lease with friends.
-4. Stop asking questions when the student says something like "that's all", "done", or "search now".
-5. Build the Ohana filtered search URL and scrape automatically.
-6. Save CSV/JSONL outputs and produce a short student-facing summary.
-
-You can seed the intake with an initial request:
-
-```bash
-python run_housing_agent.py \
-  "I'm a Northeastern student looking for a furnished private room in Boston under $1800" \
-  --max-listings 10
-```
-
-To skip follow-up questions and use the older one-shot behavior:
-
-```bash
-python run_housing_agent.py \
-  "furnished private room near Northeastern under $1800 from May 1 to August 31, 2026" \
-  --one-shot
-```
-
-If you want to watch the browser while debugging:
-
-```bash
-python run_housing_agent.py "private room near NYU under $2200 for fall 2026" --headed
-```
-
-The reusable integration point for a larger system is:
+The old direct LLM-to-scraper bridge has been removed. The current reusable integration point is deterministic: build a structured intent or plan, inspect provider capability/query quality, then call the router explicitly.
 
 ```python
-from src.ohana_agent.housing_agent import run_student_housing_agent
+from src.housing_agent import HousingSearchIntent, plan_query
 
-result = run_student_housing_agent(
-    "Private room near Harvard under $1700 from June 1 to August 31, 2026",
-    max_listings=10,
-    fetch_listing_api=True,
+intent = HousingSearchIntent(
+    location="Boston, MA",
+    max_price=1800,
+    bedrooms=1,
+    type_of_places=("Private room",),
+    furnished=True,
+    intent_kind="student_sublet",
 )
 
-print(result.plan)
-print(result.search.records)
-print(result.summary)
+query_plan = plan_query(intent)
+print(query_plan.ranked_provider_names)
+print(query_plan.for_provider("ohana").report.applied_at_source)
 ```
+
+Provider scraping still happens through provider-specific CLIs or the deterministic router in `src.ohana_agent.provider_router`. A future LLM layer should target this capability/query-planning API rather than calling scrapers directly.
 
 ## Updating selectors
 

@@ -6,8 +6,34 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.ohana_agent.housing_agent import StudentHousingSearchPlan, run_student_housing_agent
-from src.ohana_agent.provider_router import normalize_provider_names
+from src.ohana_agent.provider_router import normalize_provider_names, run_provider_searches
+
+
+def make_plan(**overrides):
+    values = {
+        "location": "Boston, MA",
+        "providers": ["ohana"],
+        "movein": None,
+        "moveout": None,
+        "property_types": None,
+        "type_of_places": None,
+        "num_bedrooms": None,
+        "num_bathrooms": None,
+        "min_price": None,
+        "max_price": None,
+        "pet_policy": None,
+        "furnished_status": None,
+        "photos": False,
+        "verified": False,
+        "featured": False,
+        "sort": None,
+        "page": None,
+        "max_listings": 2,
+        "notes": None,
+        "assumptions": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def fake_result(provider: str, records: list[dict], tmpdir: str):
@@ -28,65 +54,50 @@ class HousingProviderRoutingTests(unittest.TestCase):
             ["ohana", "rentalsource", "affordablehousing"],
         )
 
-    def test_ohana_still_runs_through_main_flow(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
-            providers=["ohana"],
-            max_listings=2,
-        )
+    def test_ohana_runs_through_deterministic_router(self) -> None:
+        plan = make_plan(providers=["ohana"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_ohana_search") as run_ohana:
-                    run_ohana.return_value = fake_result(
-                        "ohana",
-                        [{"source": "ohana", "title": "Student sublet", "url": "https://liveohana.ai/listing/1"}],
-                        tmpdir,
-                    )
+            with patch("src.ohana_agent.provider_router.run_ohana_search") as run_ohana:
+                run_ohana.return_value = fake_result(
+                    "ohana",
+                    [{"source": "ohana", "title": "Student sublet", "url": "https://liveohana.ai/listing/1"}],
+                    tmpdir,
+                )
 
-                    result = run_student_housing_agent("Find a Boston sublet", summarize=False)
+                result = run_provider_searches(plan, providers=plan.providers)
 
-        self.assertEqual(len(result.search.records), 1)
-        self.assertEqual(result.search.records[0]["provider"], "ohana")
-        self.assertEqual(result.search.provider_results[0].status, "ok")
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0]["provider"], "ohana")
+        self.assertEqual(result.provider_results[0].status, "ok")
         run_ohana.assert_called_once()
 
-    def test_rentalsource_can_be_instructed_through_main_flow(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
-            providers=["ohana"],
-            max_listings=2,
-        )
+    def test_rentalsource_can_be_selected_through_deterministic_router(self) -> None:
+        plan = make_plan(providers=["rentalsource"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
-                    run_rentalsource.return_value = fake_result(
-                        "rentalsource",
-                        [
-                            {
-                                "source": "rentalsource",
-                                "title": "Market apartment",
-                                "url": "https://www.rentalsource.com/details/1/",
-                            }
-                        ],
-                        tmpdir,
-                    )
+            with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
+                run_rentalsource.return_value = fake_result(
+                    "rentalsource",
+                    [
+                        {
+                            "source": "rentalsource",
+                            "title": "Market apartment",
+                            "url": "https://www.rentalsource.com/details/1/",
+                        }
+                    ],
+                    tmpdir,
+                )
 
-                    result = run_student_housing_agent(
-                        "Find a Boston apartment",
-                        providers=["rentalsource"],
-                        summarize=False,
-                    )
+                result = run_provider_searches(plan, providers=plan.providers)
 
-        self.assertEqual(len(result.search.records), 1)
-        self.assertEqual(result.search.records[0]["provider"], "rentalsource")
-        self.assertEqual(result.search.provider_results[0].provider, "rentalsource")
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0]["provider"], "rentalsource")
+        self.assertEqual(result.provider_results[0].provider, "rentalsource")
         run_rentalsource.assert_called_once()
 
     def test_rentalsource_router_passes_full_url_filters_and_reports_them(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
+        plan = make_plan(
             providers=["rentalsource"],
             property_types=["Apartment"],
             num_bedrooms=2,
@@ -99,22 +110,17 @@ class HousingProviderRoutingTests(unittest.TestCase):
             featured=True,
             sort="price-high",
             page=2,
-            max_listings=2,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
-                    run_rentalsource.return_value = fake_result(
-                        "rentalsource",
-                        [{"source": "rentalsource", "title": "Filtered apartment"}],
-                        tmpdir,
-                    )
+            with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
+                run_rentalsource.return_value = fake_result(
+                    "rentalsource",
+                    [{"source": "rentalsource", "title": "Filtered apartment"}],
+                    tmpdir,
+                )
 
-                    result = run_student_housing_agent(
-                        "Find a verified Boston apartment with photos",
-                        summarize=False,
-                    )
+                result = run_provider_searches(plan, providers=plan.providers)
 
         options = run_rentalsource.call_args.args[0]
         self.assertEqual(options.num_bathrooms, 1.5)
@@ -125,7 +131,7 @@ class HousingProviderRoutingTests(unittest.TestCase):
         self.assertEqual(options.sort, "price-high")
         self.assertEqual(options.page, 2)
 
-        provider_result = result.search.provider_results[0]
+        provider_result = result.provider_results[0]
         self.assertEqual(provider_result.query_quality["status"], "source_applied")
         self.assertIn("num_bathrooms", provider_result.filter_application["source_applied"])
         self.assertIn("photos", provider_result.filter_application["source_applied"])
@@ -134,93 +140,79 @@ class HousingProviderRoutingTests(unittest.TestCase):
         self.assertIn("sort", provider_result.filter_application["source_applied"])
         self.assertIn("page", provider_result.filter_application["source_applied"])
 
-    def test_affordablehousing_can_be_selected_by_plan_through_main_flow(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
+    def test_affordablehousing_can_be_selected_through_deterministic_router(self) -> None:
+        plan = make_plan(
             providers=["affordablehousing"],
-            max_listings=2,
             notes=["Student asked for income restricted housing."],
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
-                    run_affordable.return_value = fake_result(
-                        "affordablehousing",
-                        [
-                            {
-                                "source": "affordablehousing",
-                                "title": "Affordable apartment",
-                                "url": "https://www.affordablehousing.com/boston-ma/a-1/",
-                            }
-                        ],
-                        tmpdir,
-                    )
+            with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                run_affordable.return_value = fake_result(
+                    "affordablehousing",
+                    [
+                        {
+                            "source": "affordablehousing",
+                            "title": "Affordable apartment",
+                            "url": "https://www.affordablehousing.com/boston-ma/a-1/",
+                        }
+                    ],
+                    tmpdir,
+                )
 
-                    result = run_student_housing_agent("Find affordable housing in Boston", summarize=False)
+                result = run_provider_searches(plan, providers=plan.providers)
 
-        self.assertEqual(len(result.search.records), 1)
-        self.assertEqual(result.search.records[0]["provider"], "affordablehousing")
-        self.assertEqual(result.search.provider_results[0].status, "ok")
+        self.assertEqual(len(result.records), 1)
+        self.assertEqual(result.records[0]["provider"], "affordablehousing")
+        self.assertEqual(result.provider_results[0].status, "ok")
         run_affordable.assert_called_once()
 
     def test_affordablehousing_report_does_not_mark_min_price_source_applied(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
+        plan = make_plan(
             providers=["affordablehousing"],
             min_price=900,
             max_price=1800,
-            max_listings=2,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
-                    run_affordable.return_value = fake_result(
-                        "affordablehousing",
-                        [{"source": "affordablehousing", "title": "Affordable unit"}],
-                        tmpdir,
-                    )
+            with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                run_affordable.return_value = fake_result(
+                    "affordablehousing",
+                    [{"source": "affordablehousing", "title": "Affordable unit"}],
+                    tmpdir,
+                )
 
-                    result = run_student_housing_agent(
-                        "Find affordable housing from 900 to 1800 in Boston",
-                        summarize=False,
-                    )
+                result = run_provider_searches(plan, providers=plan.providers)
 
-        provider_result = result.search.provider_results[0]
+        provider_result = result.provider_results[0]
         self.assertIn("max_price", provider_result.filter_application["source_applied"])
         self.assertNotIn("min_price", provider_result.filter_application["source_applied"])
         self.assertIn("min_price", provider_result.filter_application["not_source_applied"])
         self.assertEqual(provider_result.query_quality["status"], "partial")
 
     def test_multi_provider_search_keeps_successes_when_one_empty_and_one_errors(self) -> None:
-        plan = StudentHousingSearchPlan(
-            location="Boston, MA",
-            providers=["ohana", "rentalsource", "affordablehousing"],
-            max_listings=2,
-        )
+        plan = make_plan(providers=["ohana", "rentalsource", "affordablehousing"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.ohana_agent.housing_agent.plan_student_housing_search", return_value=plan):
-                with patch("src.ohana_agent.provider_router.run_ohana_search") as run_ohana:
-                    with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
-                        with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
-                            run_ohana.return_value = fake_result("ohana", [], tmpdir)
-                            run_rentalsource.side_effect = RuntimeError("RentalSource unavailable")
-                            run_affordable.return_value = fake_result(
-                                "affordablehousing",
-                                [{"source": "affordablehousing", "title": "Affordable unit"}],
-                                tmpdir,
-                            )
+            with patch("src.ohana_agent.provider_router.run_ohana_search") as run_ohana:
+                with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
+                    with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                        run_ohana.return_value = fake_result("ohana", [], tmpdir)
+                        run_rentalsource.side_effect = RuntimeError("RentalSource unavailable")
+                        run_affordable.return_value = fake_result(
+                            "affordablehousing",
+                            [{"source": "affordablehousing", "title": "Affordable unit"}],
+                            tmpdir,
+                        )
 
-                            result = run_student_housing_agent("Search across providers", summarize=False)
+                        result = run_provider_searches(plan, providers=plan.providers)
 
-        statuses = {provider_result.provider: provider_result.status for provider_result in result.search.provider_results}
+        statuses = {provider_result.provider: provider_result.status for provider_result in result.provider_results}
         self.assertEqual(statuses["ohana"], "empty")
         self.assertEqual(statuses["rentalsource"], "failed")
         self.assertEqual(statuses["affordablehousing"], "ok")
-        self.assertEqual(len(result.search.records), 1)
-        self.assertIn("rentalsource", result.search.errors)
+        self.assertEqual(len(result.records), 1)
+        self.assertIn("rentalsource", result.errors)
 
 
 if __name__ == "__main__":
