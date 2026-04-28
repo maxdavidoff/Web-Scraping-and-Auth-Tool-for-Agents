@@ -124,9 +124,9 @@ class InteractiveHousingAgentTests(unittest.TestCase):
                 agent = InteractiveHousingAgent(client=FakeJsonClient([response]))
                 turn = agent.handle_user_message("housing request")
 
-                self.assertEqual(turn.state, "planned")
+                self.assertEqual(turn.state, "execution_confirmation_requested")
                 self.assertEqual(turn.query_plan.ranked_provider_names[0], expected_provider)
-                self.assertIn("Provider ranking", turn.message)
+                self.assertIn("Want me to run it?", turn.message)
 
     def test_multi_turn_messages_update_same_intent(self) -> None:
         client = FakeJsonClient(
@@ -151,7 +151,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         second = agent.handle_user_message("Boston under 1800")
 
         self.assertEqual(first.state, "needs_clarification")
-        self.assertEqual(second.state, "planned")
+        self.assertEqual(second.state, "execution_confirmation_requested")
         self.assertEqual(agent.current_intent.location, "Boston, MA")
         self.assertEqual(agent.current_intent.max_price, 1800)
         self.assertEqual(agent.current_intent.type_of_places, ("Private room",))
@@ -181,7 +181,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         agent.handle_user_message("I need an apartment in Boston under 1800")
         turn = agent.handle_user_message("actually make it Philadelphia")
 
-        self.assertEqual(turn.state, "planned")
+        self.assertEqual(turn.state, "execution_confirmation_requested")
         self.assertEqual(agent.current_intent.location, "Philadelphia, PA")
 
     def test_negation_can_clear_prior_pet_policy(self) -> None:
@@ -208,7 +208,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         agent.handle_user_message("I need a dog friendly apartment in Boston")
         turn = agent.handle_user_message("actually no pets")
 
-        self.assertEqual(turn.state, "planned")
+        self.assertEqual(turn.state, "execution_confirmation_requested")
         self.assertEqual(agent.current_intent.pet_policy, ())
 
     def test_not_affordable_housing_ranks_rentalsource_above_affordablehousing(self) -> None:
@@ -227,7 +227,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
 
         turn = agent.handle_user_message("I need a normal apartment, not affordable housing, in Boston")
 
-        self.assertEqual(turn.state, "planned")
+        self.assertEqual(turn.state, "execution_confirmation_requested")
         self.assertEqual(turn.query_plan.ranked_provider_names[0], "rentalsource")
         self.assertGreater(
             turn.query_plan.for_provider("rentalsource").score,
@@ -260,17 +260,39 @@ class InteractiveHousingAgentTests(unittest.TestCase):
             max_listings=5,
         )
 
-        plan_turn = agent.handle_user_message("I need an apartment in Boston")
-        confirmation = agent.handle_user_message("execute")
+        confirmation = agent.handle_user_message("I need an apartment in Boston")
         execution = agent.handle_user_message("yes")
 
-        self.assertEqual(plan_turn.state, "planned")
         self.assertEqual(confirmation.state, "execution_confirmation_requested")
-        self.assertIn("Max listings per provider: 5", confirmation.message)
+        self.assertIn("return up to 5 listings", confirmation.message)
         self.assertEqual(execution.state, "executed")
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_listings"], 5)
-        self.assertIn("rentalsource", runner.call_args.kwargs["providers"])
+        self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource",))
+
+    def test_execute_command_repeats_agent_led_confirmation(self) -> None:
+        runner = Mock(return_value=fake_router_result())
+        agent = InteractiveHousingAgent(
+            client=FakeJsonClient(
+                [
+                    {
+                        "location": "Boston, MA",
+                        "property_types": ["Apartment"],
+                        "intent_kind": "general_rental",
+                    }
+                ]
+            ),
+            runner=runner,
+            max_listings=5,
+        )
+
+        agent.handle_user_message("I need an apartment in Boston")
+        confirmation = agent.handle_user_message("execute")
+
+        self.assertEqual(confirmation.state, "execution_confirmation_requested")
+        self.assertIn("RentalSource", confirmation.message)
+        self.assertIn("Want me to run it?", confirmation.message)
+        runner.assert_not_called()
 
     def test_yes_and_no_too_early_do_not_execute(self) -> None:
         runner = Mock()
@@ -301,7 +323,6 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         )
 
         agent.handle_user_message("I need an apartment in Boston")
-        agent.handle_user_message("execute")
         turn = agent.handle_user_message("no")
 
         self.assertEqual(turn.state, "planned")
@@ -358,7 +379,6 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         )
 
         agent.handle_user_message("I need an apartment in Boston")
-        agent.handle_user_message("execute")
         turn = agent.handle_user_message("reset")
 
         self.assertEqual(turn.state, "reset")

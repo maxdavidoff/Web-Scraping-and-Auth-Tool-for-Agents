@@ -188,7 +188,7 @@ For a back-and-forth terminal experience, use the interactive chat agent:
 python run_housing_chat.py --max-listings 5
 ```
 
-The chat agent maintains intent across turns, asks for missing location or purpose when needed, plans by default, and only executes after `execute` followed by `yes`.
+The chat agent maintains intent across turns, asks for missing location or purpose when needed, proposes the best provider to search first, and only executes after the user confirms with a reply like `yes`.
 
 Scraping is opt-in:
 

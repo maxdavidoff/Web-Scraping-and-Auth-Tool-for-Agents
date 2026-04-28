@@ -21,18 +21,19 @@ from .types import HousingSearchIntent, QueryPlan
 AgentRunner = Callable[..., Any]
 
 HELP_TEXT = """
-Commands:
-  help, h                  Show this help.
-  show                     Show the current intent and plan.
-  plan                     Review the current provider plan.
-  execute                  Prepare execution confirmation.
-  yes                      Run only when execution confirmation is pending.
-  no                       Cancel pending execution confirmation.
+Tell me what you are looking for in normal language. I will ask one clarification if I need it, then suggest the best source to search first.
+
+Useful replies:
+  yes                      Run the proposed search.
+  no                       Do not run the proposed search.
+  reset, clear             Start over.
+  quit, exit, q            Leave the chat.
+
+Debug commands:
+  show, plan               Review the current plan.
   json                     Show debug JSON for the current state.
   transcript               Show this session's user transcript.
   max-listings <n>, max <n> Set max listings per provider.
-  reset, clear             Clear this search and start over.
-  quit, exit, q            Leave the chat.
 """.strip()
 
 
@@ -82,6 +83,7 @@ class InteractiveHousingAgent:
         self.latest_planning_payload: dict[str, Any] | None = None
         self.latest_execution_result: Any | None = None
         self.pending_execution_confirmation = False
+        self.proposed_execution_providers: tuple[str, ...] = ()
 
     def handle_user_message(self, raw_message: str) -> AgentTurn:
         message = raw_message.strip()
@@ -98,6 +100,7 @@ class InteractiveHousingAgent:
             return command_turn
 
         self.pending_execution_confirmation = False
+        self.proposed_execution_providers = ()
         self.latest_execution_result = None
         previous_transcript = list(self.transcript)
         self.transcript.append({"role": "user", "content": message})
@@ -134,13 +137,7 @@ class InteractiveHousingAgent:
                 json_payload=self.current_state_payload(),
             )
 
-        return AgentTurn(
-            state="planned",
-            message=self.render_plan(),
-            intent=self.current_intent,
-            query_plan=self.latest_plan,
-            json_payload=self.current_state_payload(),
-        )
+        return self._agent_led_planning_turn()
 
     def reset(self) -> AgentTurn:
         self.transcript = []
@@ -149,6 +146,7 @@ class InteractiveHousingAgent:
         self.latest_planning_payload = None
         self.latest_execution_result = None
         self.pending_execution_confirmation = False
+        self.proposed_execution_providers = ()
         return AgentTurn(
             state="reset",
             message="Reset complete. Tell me what kind of housing you are looking for.",
@@ -161,6 +159,7 @@ class InteractiveHousingAgent:
             "intent": _to_jsonable(self.current_intent),
             "query_plan": query_plan_to_dict(self.latest_plan) if self.latest_plan else None,
             "pending_execution_confirmation": self.pending_execution_confirmation,
+            "proposed_execution_providers": list(self.proposed_execution_providers),
             "max_listings": self.max_listings,
             "execution_result": self._execution_payload(self.latest_execution_result),
             "transcript": list(self.transcript),
@@ -201,30 +200,40 @@ class InteractiveHousingAgent:
             lines.extend(["", "Warnings:"])
             lines.extend(f"- {warning}" for warning in warnings)
 
-        lines.extend(["", "No search has run yet. Type `execute` to review what would run."])
+        recommended = self._recommended_execution_providers()
+        if recommended:
+            lines.extend(
+                [
+                    "",
+                    _proposal_sentence(recommended, self.max_listings),
+                ]
+            )
+        else:
+            lines.extend(["", "No search has run yet."])
         return "\n".join(lines)
 
     def render_execution_confirmation(self) -> str:
         if not self.latest_plan:
             return "No plan is available yet."
 
+        providers = self.proposed_execution_providers or self._recommended_execution_providers()
         executable_providers, skipped = executable_provider_plan(self.latest_plan)
-        provider_text = ", ".join(executable_providers) or "none"
+        provider_text = ", ".join(_provider_label(provider) for provider in providers) or "none"
         browser_mode = "headless" if self.headless else "headed"
         lines = [
-            "I am ready to run the deterministic provider router.",
+            "I can run this search now.",
             f"- Providers: {provider_text}",
             f"- Max listings per provider: {self.max_listings}",
             f"- Browser mode: {browser_mode}",
         ]
         if self.state_file:
             lines.append(f"- Browser state file: {self.state_file}")
-        if OHANA in executable_providers:
+        if OHANA in providers:
             lines.append("- Caveat: Ohana may require a saved login session. If it fails, run save_ohana_login.py first.")
         for skipped_provider in skipped:
             lines.append(f"- Skipped: {skipped_provider['provider']} ({skipped_provider['reason']})")
         lines.append("")
-        lines.append("Type `yes` to run or `no` to cancel.")
+        lines.append("Want me to run it?")
         return "\n".join(lines)
 
     def render_execution_result(self, result: Any) -> str:
@@ -291,9 +300,9 @@ class InteractiveHousingAgent:
             return self._plan_command()
         if lower == "execute":
             return self._execute_command()
-        if lower == "yes":
+        if lower in {"yes", "y", "go ahead", "search", "run it", "please do", "do it"}:
             return self._yes_command()
-        if lower == "no":
+        if lower in {"no", "n", "cancel", "not now"}:
             return self._no_command()
         if lower == "json":
             payload = self.current_state_payload()
@@ -325,6 +334,7 @@ class InteractiveHousingAgent:
                 )
             self.max_listings = max_listings
             self.pending_execution_confirmation = False
+            self.proposed_execution_providers = ()
             return AgentTurn(
                 state=self._current_state(),
                 message=f"Max listings per provider set to {self.max_listings}.",
@@ -357,13 +367,7 @@ class InteractiveHousingAgent:
                 intent=self.current_intent,
                 json_payload=self.current_state_payload(),
             )
-        return AgentTurn(
-            state="planned",
-            message=self.render_plan(),
-            intent=self.current_intent,
-            query_plan=self.latest_plan,
-            json_payload=self.current_state_payload(),
-        )
+        return self._agent_led_planning_turn()
 
     def _execute_command(self) -> AgentTurn:
         if not self.current_intent or not self.latest_plan:
@@ -381,8 +385,8 @@ class InteractiveHousingAgent:
                 query_plan=self.latest_plan,
                 json_payload=self.current_state_payload(),
             )
-        executable_providers, _skipped = executable_provider_plan(self.latest_plan)
-        if not executable_providers:
+        proposed_providers = self._recommended_execution_providers()
+        if not proposed_providers:
             return AgentTurn(
                 state="blocked",
                 message="Execution is blocked because no executable provider is available for this plan.",
@@ -391,6 +395,7 @@ class InteractiveHousingAgent:
                 json_payload=self.current_state_payload(),
             )
         self.pending_execution_confirmation = True
+        self.proposed_execution_providers = proposed_providers
         return AgentTurn(
             state="execution_confirmation_requested",
             message=self.render_execution_confirmation(),
@@ -410,13 +415,23 @@ class InteractiveHousingAgent:
             )
         if not self.current_intent or not self.latest_plan:
             self.pending_execution_confirmation = False
+            self.proposed_execution_providers = ()
             return AgentTurn(
                 state="blocked",
                 message="Execution is blocked because the current plan is missing.",
                 json_payload=self.current_state_payload(),
             )
 
-        executable_providers, _skipped = executable_provider_plan(self.latest_plan)
+        executable_providers = self.proposed_execution_providers or self._recommended_execution_providers()
+        if not executable_providers:
+            self.pending_execution_confirmation = False
+            return AgentTurn(
+                state="blocked",
+                message="Execution is blocked because no executable provider is available for this plan.",
+                intent=self.current_intent,
+                query_plan=self.latest_plan,
+                json_payload=self.current_state_payload(),
+            )
         execution_plan = legacy_router_plan_from_intent(
             self.current_intent,
             providers=executable_providers,
@@ -436,6 +451,7 @@ class InteractiveHousingAgent:
             )
         except Exception as exc:
             self.pending_execution_confirmation = False
+            self.proposed_execution_providers = ()
             return AgentTurn(
                 state="error",
                 message=f"Search execution failed before provider results were returned: {exc}",
@@ -445,6 +461,7 @@ class InteractiveHousingAgent:
             )
 
         self.pending_execution_confirmation = False
+        self.proposed_execution_providers = ()
         self.latest_execution_result = result
         return AgentTurn(
             state="executed",
@@ -465,6 +482,7 @@ class InteractiveHousingAgent:
                 json_payload=self.current_state_payload(),
             )
         self.pending_execution_confirmation = False
+        self.proposed_execution_providers = ()
         return AgentTurn(
             state="planned",
             message="Execution canceled. No search has run.",
@@ -479,6 +497,64 @@ class InteractiveHousingAgent:
         if not _has_purpose_signal(intent):
             return "Is this a student/sublet room search, a regular rental search, or affordable/voucher housing?"
         return None
+
+    def _agent_led_planning_turn(self) -> AgentTurn:
+        proposed_providers = self._recommended_execution_providers()
+        if proposed_providers:
+            self.pending_execution_confirmation = True
+            self.proposed_execution_providers = proposed_providers
+            state = "execution_confirmation_requested"
+        else:
+            self.pending_execution_confirmation = False
+            self.proposed_execution_providers = ()
+            state = "planned"
+        return AgentTurn(
+            state=state,
+            message=self.render_agent_led_plan(),
+            intent=self.current_intent,
+            query_plan=self.latest_plan,
+            json_payload=self.current_state_payload(),
+        )
+
+    def render_agent_led_plan(self) -> str:
+        if not self.current_intent or not self.latest_plan:
+            return "Tell me what kind of housing you are looking for."
+
+        top_plan = self.latest_plan.provider_plans[0]
+        proposed = self.proposed_execution_providers or self._recommended_execution_providers()
+        lines = [
+            _one_line_intent(self.current_intent),
+            "",
+            f"I’d start with {_provider_label(top_plan.provider)} because {_user_facing_reason(top_plan.provider)}",
+        ]
+
+        warnings = _user_facing_warnings(self.latest_plan)
+        if warnings:
+            lines.extend(["", *[f"Note: {warning}" for warning in warnings]])
+
+        if proposed:
+            provider_text = ", ".join(_provider_label(provider) for provider in proposed)
+            lines.extend(
+                [
+                    "",
+                    f"I can search {provider_text} now and return up to {self.max_listings} listings.",
+                    "Want me to run it?",
+                ]
+            )
+        else:
+            lines.append("")
+            lines.append("I can plan this, but I do not have an executable provider to run for it yet.")
+        return "\n".join(lines)
+
+    def _recommended_execution_providers(self) -> tuple[str, ...]:
+        if not self.latest_plan:
+            return ()
+        executable_providers, _skipped = executable_provider_plan(self.latest_plan)
+        executable = set(executable_providers)
+        for provider_plan in self.latest_plan.provider_plans:
+            if provider_plan.provider in executable:
+                return (provider_plan.provider,)
+        return ()
 
     def _planning_payload(self) -> dict[str, Any] | None:
         if not self.current_intent or not self.latest_plan:
@@ -619,6 +695,72 @@ def _why_line(reasons: Sequence[str]) -> str:
     if useful_reasons:
         return "; ".join(useful_reasons[:2])
     return reasons[0] if reasons else "ranked by provider capability fit"
+
+
+def _provider_label(provider: str) -> str:
+    labels = {
+        RENTALSOURCE: "RentalSource",
+        OHANA: "Ohana",
+        AFFORDABLEHOUSING: "AffordableHousing",
+    }
+    return labels.get(provider, provider)
+
+
+def _user_facing_reason(provider: str) -> str:
+    if provider == RENTALSOURCE:
+        return "it is the best fit for general apartment, house, and rental searches."
+    if provider == OHANA:
+        return "it is the best fit for furnished rooms, student housing, and sublets."
+    if provider == AFFORDABLEHOUSING:
+        return "it is the best fit for voucher, income-restricted, and affordable housing searches."
+    return "it ranked highest for this search."
+
+
+def _proposal_sentence(providers: Sequence[str], max_listings: int) -> str:
+    provider_text = ", ".join(_provider_label(provider) for provider in providers)
+    return f"I can search {provider_text} now and return up to {max_listings} listings. Want me to run it?"
+
+
+def _one_line_intent(intent: HousingSearchIntent) -> str:
+    pieces: list[str] = []
+    if intent.property_types:
+        pieces.append(", ".join(intent.property_types).lower())
+    elif intent.type_of_places:
+        pieces.append(", ".join(intent.type_of_places).lower())
+    elif intent.intent_kind and intent.intent_kind != "unknown":
+        pieces.append(intent.intent_kind.replace("_", " "))
+    else:
+        pieces.append("housing")
+
+    if intent.location:
+        pieces.append(f"in {intent.location}")
+    if intent.max_price:
+        pieces.append(f"under ${intent.max_price:,}")
+    if intent.bedrooms:
+        pieces.append(f"with {intent.bedrooms} bedroom(s)")
+    elif intent.bedroom_min:
+        pieces.append(f"with at least {intent.bedroom_min} bedroom(s)")
+    if intent.furnished is True:
+        pieces.append("furnished")
+    if intent.pet_policy:
+        pieces.append("pet-friendly")
+
+    return "I understand you’re looking for " + " ".join(pieces) + "."
+
+
+def _user_facing_warnings(query_plan: QueryPlan) -> list[str]:
+    warnings: list[str] = []
+    date_filters = {"move_in_date", "move_out_date"}
+    if any(
+        date_filters.intersection(provider_plan.report.unknown_unverified)
+        or date_filters.intersection(provider_plan.report.unsupported)
+        for provider_plan in query_plan.provider_plans
+    ):
+        warnings.append("Date filters may need to be checked after results because they are not verified source filters everywhere.")
+    top_provider = query_plan.provider_plans[0].provider if query_plan.provider_plans else ""
+    if top_provider == OHANA:
+        warnings.append("Ohana may require a saved login session.")
+    return warnings
 
 
 def _artifact_lines(provider_results: Sequence[Any]) -> list[str]:

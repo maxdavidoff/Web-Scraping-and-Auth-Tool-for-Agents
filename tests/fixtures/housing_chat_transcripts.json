@@ -1,0 +1,100 @@
+[
+  {
+    "name": "general_apartment_new_york",
+    "model_responses": [
+      {
+        "location": "New York",
+        "property_types": ["Apartment"],
+        "intent_kind": "apartment"
+      }
+    ],
+    "turns": [
+      {
+        "user": "i need an apartment in new york",
+        "agent_should_include": ["RentalSource", "Want me to run it?"]
+      },
+      {
+        "user": "yes",
+        "agent_should_include": ["Search execution finished"],
+        "expected_execute_provider": "rentalsource"
+      }
+    ]
+  },
+  {
+    "name": "student_private_room_boston",
+    "model_responses": [
+      {
+        "location": "Boston, MA",
+        "max_price": 1800,
+        "type_of_places": ["Private room"],
+        "furnished": true,
+        "intent_kind": "student_sublet"
+      }
+    ],
+    "turns": [
+      {
+        "user": "I need a furnished private room in Boston under 1800",
+        "agent_should_include": ["Ohana", "Want me to run it?"]
+      },
+      {
+        "user": "yes",
+        "agent_should_include": ["Search execution finished"],
+        "expected_execute_provider": "ohana"
+      }
+    ]
+  },
+  {
+    "name": "voucher_housing_boston",
+    "model_responses": [
+      {
+        "location": "Boston, MA",
+        "max_price": 1600,
+        "section8": true,
+        "income_restricted": true,
+        "intent_kind": "affordable",
+        "notes": ["voucher holder"]
+      }
+    ],
+    "turns": [
+      {
+        "user": "I have a voucher and need income restricted housing in Boston under 1600",
+        "agent_should_include": ["AffordableHousing", "Want me to run it?"]
+      },
+      {
+        "user": "yes",
+        "agent_should_include": ["Search execution finished"],
+        "expected_execute_provider": "affordablehousing"
+      }
+    ]
+  },
+  {
+    "name": "correction_updates_location",
+    "model_responses": [
+      {
+        "location": "Boston, MA",
+        "property_types": ["Apartment"],
+        "intent_kind": "general_rental"
+      },
+      {
+        "location": "Philadelphia, PA",
+        "property_types": ["Apartment"],
+        "intent_kind": "general_rental"
+      }
+    ],
+    "turns": [
+      {
+        "user": "I need an apartment in Boston",
+        "agent_should_include": ["Boston", "RentalSource"]
+      },
+      {
+        "user": "actually make it Philadelphia",
+        "agent_should_include": ["Philadelphia", "Want me to run it?"]
+      },
+      {
+        "user": "yes",
+        "agent_should_include": ["Search execution finished"],
+        "expected_execute_provider": "rentalsource"
+      }
+    ]
+  }
+]

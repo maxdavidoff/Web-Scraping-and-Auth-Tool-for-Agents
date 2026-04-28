@@ -74,6 +74,8 @@ Try the interactive chat agent:
 python run_housing_chat.py --max-listings 5
 ```
 
+The chat agent proposes the best provider and asks before running it. Reply `yes` to execute the proposed search, or `no` to keep planning.
+
 Execute only when you explicitly want live scrapers to run:
 
 ```bash
