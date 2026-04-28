@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -70,7 +71,12 @@ class MistralChatClient:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            context = _ssl_context()
+            if context is None:
+                response_handle = urllib.request.urlopen(request, timeout=self.timeout_seconds)
+            else:
+                response_handle = urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context)
+            with response_handle as response:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
@@ -87,6 +93,14 @@ class MistralChatClient:
 
 def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def _extract_message_content(data: Mapping[str, Any]) -> str:

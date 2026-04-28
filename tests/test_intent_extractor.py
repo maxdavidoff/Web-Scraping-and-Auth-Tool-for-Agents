@@ -149,11 +149,12 @@ class IntentExtractorTests(unittest.TestCase):
 
         captured = {}
 
-        def fake_urlopen(request, timeout):
+        def fake_urlopen(request, timeout, **kwargs):
             captured["url"] = request.full_url
             captured["headers"] = dict(request.header_items())
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             captured["timeout"] = timeout
+            captured["context"] = kwargs.get("context")
             return FakeHTTPResponse(response_payload)
 
         client = MistralChatClient(
@@ -168,6 +169,7 @@ class IntentExtractorTests(unittest.TestCase):
         self.assertEqual(content, '{"location": "Philadelphia, PA", "max_price": 2000}')
         self.assertEqual(captured["url"], "https://api.mistral.test/v1/chat/completions")
         self.assertEqual(captured["timeout"], 7)
+        self.assertIsNotNone(captured["context"])
         self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
         self.assertEqual(captured["payload"]["model"], "mistral-small-latest")
         self.assertEqual(captured["payload"]["response_format"], {"type": "json_object"})
