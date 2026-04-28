@@ -40,9 +40,9 @@ Return exactly one JSON object. Do not choose providers and do not mention scrap
 Use null for unknown scalar values, false for unknown booleans, and [] for unknown lists.
 
 Allowed keys:
-location, min_price, max_price,
+location, neighborhoods, avoid_neighborhoods, min_price, max_price,
 price_basis, bedrooms, bedroom_min, bedroom_max, bathrooms,
-bathroom_min, property_types, type_of_places, pet_policy, furnished,
+bathroom_min, property_types, type_of_places, pet_policy, pet_policy_negated, furnished,
 move_in_date, move_out_date, lease_length, campus_or_school,
 commute_target, max_commute_minutes, roommate_count, amenities,
 required_amenities, preferred_amenities, dealbreakers, safety_priority,
@@ -53,19 +53,20 @@ intent_kind, flexibility_notes, notes.
 
 Field guidance:
 - location should be the larger city or metro area to search. Do not use a neighborhood, campus, building, or small area as location.
-- Do not ask for, store, or track neighborhood preferences. The provider searches are city-wide, so neighborhoods are not initial search filters.
-- If the user gives a neighborhood together with a larger city, keep only the larger city in location and ignore the neighborhood for initial search planning.
+- Preserve neighborhood preferences in neighborhoods and areas the user wants to avoid in avoid_neighborhoods. Provider searches are city-wide, so neighborhoods are not initial source filters.
+- If the user gives a neighborhood together with a larger city, keep the larger city in location and put the neighborhood in neighborhoods.
 - If the user gives only a neighborhood, campus, or small area and no larger city can be reasonably inferred, leave location null so the agent can ask for the larger city.
 - For campus searches, fill campus_or_school and infer a practical larger city only when obvious, but do not turn the request into all property_types unless the user explicitly says they are open to all property types.
 - For summer programs, summer internships, semesters, or sublets, set intent_kind to student_sublet when appropriate and preserve timing in move dates, lease_length, or notes.
 - roommate_count is the number of roommates the user plans to live with. Use 0 for living alone, 1 for one roommate, and 2+ for multiple roommates or a group rental.
 - If the user is looking for a full rental with multiple roommates, set intent_kind to general_rental unless affordable/voucher signals are explicit.
 - If the user is looking just for themself, a private room, a shared room, or a solo sublet, preserve that with roommate_count and/or type_of_places.
+- bedrooms is the apartment's total bedroom count. Do not infer bedrooms=1 from type_of_places=["Private room"]; leave bedrooms null for private/shared room searches unless the user gives an explicit apartment size.
 - If the user says they do not know budget, room type, or timing, preserve that uncertainty in flexibility_notes instead of fabricating a value.
 - Dates should be ISO-like YYYY-MM-DD when a specific date is clear; otherwise preserve useful timing in notes.
 - property_types can include Apartment, House, Townhouse, Condo.
 - type_of_places can include Private room, Shared room, Entire place.
-- pet_policy should preserve explicit pet constraints like dogs, cats, pet friendly, no pets.
+- pet_policy should preserve positive pet constraints like dogs, cats, pet friendly. Put negated pet constraints like no pets, no dogs, no cats, without pets in pet_policy_negated instead of pet_policy.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
 - Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
 - price_basis should be one of total, per_person, per_room, unknown.
@@ -87,9 +88,9 @@ Use null for unknown scalar values, false for unknown booleans, and [] for unkno
 Do not choose providers, build URLs, mention scraping, emit browser settings, or output commands.
 
 Allowed keys:
-location, min_price, max_price,
+location, neighborhoods, avoid_neighborhoods, min_price, max_price,
 price_basis, bedrooms, bedroom_min, bedroom_max, bathrooms,
-bathroom_min, property_types, type_of_places, pet_policy, furnished,
+bathroom_min, property_types, type_of_places, pet_policy, pet_policy_negated, furnished,
 move_in_date, move_out_date, lease_length, campus_or_school,
 commute_target, max_commute_minutes, roommate_count, amenities,
 required_amenities, preferred_amenities, dealbreakers, safety_priority,
@@ -100,19 +101,20 @@ intent_kind, flexibility_notes, notes.
 
 Field guidance:
 - location should be the larger city or metro area to search. Do not use a neighborhood, campus, building, or small area as location.
-- Do not ask for, store, or track neighborhood preferences. The provider searches are city-wide, so neighborhoods are not initial search filters.
-- If the latest message gives a neighborhood or area preference but the previous intent already has a larger city, preserve the previous city in location and ignore the neighborhood for initial search planning.
+- Preserve neighborhood preferences in neighborhoods and areas the user wants to avoid in avoid_neighborhoods. Provider searches are city-wide, so neighborhoods are not initial source filters.
+- If the latest message gives a neighborhood or area preference but the previous intent already has a larger city, preserve the previous city in location and put the neighborhood in neighborhoods.
 - If the latest message gives only a neighborhood, campus, or small area and no larger city can be reasonably inferred, leave location null so the agent can ask for the larger city.
 - For campus searches, fill campus_or_school and infer a practical larger city only when obvious, but do not turn the request into all property_types unless the user explicitly says they are open to all property types.
 - For summer programs, summer internships, semesters, or sublets, set intent_kind to student_sublet when appropriate and preserve timing in move dates, lease_length, or notes.
 - roommate_count is the number of roommates the user plans to live with. Use 0 for living alone, 1 for one roommate, and 2+ for multiple roommates or a group rental.
 - If the user is looking for a full rental with multiple roommates, set intent_kind to general_rental unless affordable/voucher signals are explicit.
 - If the user is looking just for themself, a private room, a shared room, or a solo sublet, preserve that with roommate_count and/or type_of_places.
+- bedrooms is the apartment's total bedroom count. Do not infer bedrooms=1 from type_of_places=["Private room"]; leave bedrooms null for private/shared room searches unless the user gives an explicit apartment size.
 - If the user says they do not know budget, room type, or timing, preserve that uncertainty in flexibility_notes instead of fabricating a value.
 - Dates should be ISO-like YYYY-MM-DD when a specific date is clear; otherwise preserve useful timing in notes.
 - property_types can include Apartment, House, Townhouse, Condo.
 - type_of_places can include Private room, Shared room, Entire place.
-- pet_policy should preserve explicit pet constraints like dogs, cats, pet friendly, no pets.
+- pet_policy should preserve positive pet constraints like dogs, cats, pet friendly. Put negated pet constraints like no pets, no dogs, no cats, without pets in pet_policy_negated instead of pet_policy.
 - furnished is true only when explicitly requested, false only when explicitly unfurnished, otherwise null.
 - Put must-have amenities in required_amenities and nice-to-have amenities in preferred_amenities.
 - price_basis should be one of total, per_person, per_room, unknown.
@@ -259,8 +261,8 @@ def parse_json_object(text: str) -> dict[str, Any]:
 def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
     normalized = {
         "location": _optional_string(data.get("location")),
-        "neighborhoods": (),
-        "avoid_neighborhoods": (),
+        "neighborhoods": _string_tuple(data.get("neighborhoods")),
+        "avoid_neighborhoods": _string_tuple(data.get("avoid_neighborhoods")),
         "min_price": _optional_int(data.get("min_price")),
         "max_price": _optional_int(data.get("max_price")),
         "price_basis": _choice_string(data.get("price_basis"), {"total", "per_person", "per_room", "unknown"}, "unknown"),
@@ -271,7 +273,8 @@ def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
         "bathroom_min": _optional_float(data.get("bathroom_min")),
         "property_types": _string_tuple(data.get("property_types")),
         "type_of_places": _string_tuple(data.get("type_of_places")),
-        "pet_policy": _string_tuple(data.get("pet_policy")),
+        "pet_policy": (),
+        "pet_policy_negated": (),
         "furnished": _optional_bool(data.get("furnished")),
         "move_in_date": _optional_string(data.get("move_in_date") or data.get("movein")),
         "move_out_date": _optional_string(data.get("move_out_date") or data.get("moveout")),
@@ -303,6 +306,15 @@ def intent_from_mapping(data: Mapping[str, Any]) -> HousingSearchIntent:
         "notes": _string_tuple(data.get("notes")),
     }
 
+    pet_policy, pet_policy_negated = _normalize_pet_policy(
+        _string_tuple(data.get("pet_policy")),
+        _string_tuple(data.get("pet_policy_negated")),
+        normalized["notes"],
+        normalized["flexibility_notes"],
+    )
+    normalized["pet_policy"] = pet_policy
+    normalized["pet_policy_negated"] = pet_policy_negated
+
     furnished_status = _string_tuple(data.get("furnished_status"))
     if normalized["furnished"] is None and furnished_status:
         text = " ".join(furnished_status).lower()
@@ -320,9 +332,57 @@ def _apply_location_scope_guards(
     previous_intent: HousingSearchIntent | None = None,
 ) -> HousingSearchIntent:
     location = intent.location
+    neighborhoods = intent.neighborhoods
     if is_neighborhood_only_location(location):
+        neighborhoods = _merge_strings((location,), neighborhoods)
         location = previous_intent.location if previous_intent and previous_intent.location else None
-    return replace(intent, location=location, neighborhoods=(), avoid_neighborhoods=())
+    return replace(intent, location=location, neighborhoods=neighborhoods)
+
+
+def _normalize_pet_policy(
+    pet_policy: tuple[str, ...],
+    pet_policy_negated: tuple[str, ...],
+    notes: tuple[str, ...],
+    flexibility_notes: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    positive: list[str] = []
+    negated: list[str] = list(pet_policy_negated)
+    for value in pet_policy:
+        tokens = _pet_negation_tokens(value)
+        if tokens:
+            negated.extend(tokens)
+        else:
+            positive.append(value)
+
+    text = " ".join([*notes, *flexibility_notes])
+    negated.extend(_pet_negation_tokens(text))
+    return _merge_strings(positive, ()), _merge_strings(negated, ())
+
+
+def _pet_negation_tokens(text: str) -> tuple[str, ...]:
+    normalized = str(text).lower()
+    tokens: list[str] = []
+    patterns = [
+        ("dogs", ("no dogs", "without dogs")),
+        ("cats", ("no cats", "without cats")),
+        ("pets", ("no pets", "without pets", "pets prohibited", "not pet friendly")),
+    ]
+    for token, phrases in patterns:
+        if any(phrase in normalized for phrase in phrases):
+            tokens.append(token)
+    return tuple(tokens)
+
+
+def _merge_strings(left: Sequence[str], right: Sequence[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for value in (*left, *right):
+        text = str(value).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            merged.append(text)
+    return tuple(merged)
 
 
 def _optional_string(value: Any) -> str | None:

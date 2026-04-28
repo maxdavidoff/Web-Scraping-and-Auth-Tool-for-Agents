@@ -18,17 +18,16 @@ from .intent_extractor import (
     parse_json_object,
     update_housing_intent,
 )
-from .interactive_agent import AgentTurn, InteractiveHousingAgent
+from .llm_client import (
+    DEFAULT_MISTRAL_MODEL,
+    LLMClientError,
+    MistralChatClient,
+)
 from .listing_ranker import (
     LISTING_RANKER_SYSTEM_PROMPT,
     build_listing_ranker_messages,
     rank_listings,
     ranking_from_mapping,
-)
-from .llm_client import (
-    DEFAULT_MISTRAL_MODEL,
-    LLMClientError,
-    MistralChatClient,
 )
 from .query_planner import (
     classify_filters,
@@ -58,6 +57,15 @@ from .types import (
     SearchReadiness,
     SupportCategory,
 )
+
+
+def __getattr__(name):
+    if name in {"AgentTurn", "InteractiveHousingAgent"}:
+        from .interactive_agent import AgentTurn, InteractiveHousingAgent
+
+        return {"AgentTurn": AgentTurn, "InteractiveHousingAgent": InteractiveHousingAgent}[name]
+    raise AttributeError(name)
+
 
 __all__ = [
     "AFFORDABLEHOUSING",

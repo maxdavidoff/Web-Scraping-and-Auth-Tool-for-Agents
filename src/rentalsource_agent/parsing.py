@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
+from src.housing_agent.listing_parsing import add_structured_listing_fields
+
 PRICE_RE = re.compile(r"\$\s?[\d,]+(?:\s*(?:-|to)\s*\$?\s?[\d,]+|\+)?", re.I)
 BED_RE = re.compile(r"\b(?:studio|\d+(?:\.\d+)?\s*(?:br|bed|beds|bedroom|bedrooms))\b", re.I)
 BATH_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:bath|baths|bathroom|bathrooms)\b", re.I)
@@ -112,4 +114,4 @@ def normalize_listing(
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "raw_text": raw_text_clean,
     }
-    return record
+    return add_structured_listing_fields(record)

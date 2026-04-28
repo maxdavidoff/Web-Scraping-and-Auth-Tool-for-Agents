@@ -185,6 +185,7 @@ def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
     _add_if_value(filters, "property_types", intent.property_types)
     _add_if_value(filters, "type_of_places", intent.type_of_places)
     _add_if_value(filters, "pet_policy", intent.pet_policy)
+    _add_if_value(filters, "pet_policy_negated", intent.pet_policy_negated)
     if intent.furnished is not None:
         filters["furnished"] = intent.furnished
     _add_if_value(filters, "move_in_date", intent.move_in_date)
@@ -211,6 +212,10 @@ def requested_filters(intent: HousingSearchIntent) -> dict[str, Any]:
     if intent.washer_dryer:
         filters["washer_dryer"] = intent.washer_dryer
     _add_if_value(filters, "keyword", intent.keyword)
+    _add_if_value(filters, "required_amenities", intent.required_amenities)
+    _add_if_value(filters, "avoid_neighborhoods", intent.avoid_neighborhoods)
+    _add_if_value(filters, "lease_length", intent.lease_length)
+    _add_if_value(filters, "commute_target", intent.commute_target)
     return filters
 
 
@@ -249,6 +254,9 @@ def coerce_intent(value: HousingSearchIntent | Mapping[str, Any] | Any) -> Housi
         "property_types",
         "type_of_places",
         "pet_policy",
+        "pet_policy_negated",
+        "neighborhoods",
+        "avoid_neighborhoods",
         "amenities",
         "required_amenities",
         "preferred_amenities",

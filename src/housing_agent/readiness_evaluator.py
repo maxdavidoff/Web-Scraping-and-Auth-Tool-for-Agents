@@ -9,6 +9,7 @@ from .intent_extractor import JsonChatClient, parse_json_object
 from .llm_client import DEFAULT_MISTRAL_MODEL, MistralChatClient
 from .location_scope import asks_for_neighborhood_preference, is_neighborhood_only_location
 from .types import HousingSearchIntent, SearchReadiness
+from src.supported_locations import SUPPORTED_LOCATIONS, supported_location_for
 
 
 READINESS_SYSTEM_PROMPT = """
@@ -164,6 +165,25 @@ def apply_readiness_guards(
             reasoning_summary="I need the larger city because the housing sites search city-wide, not by exact neighborhood.",
         )
 
+    try:
+        supported_location_for(intent.location)
+    except ValueError:
+        supported = ", ".join(location.label for location in SUPPORTED_LOCATIONS.values())
+        return SearchReadiness(
+            ready_to_search=False,
+            ready_to_recommend=False,
+            confidence=_lower_confidence(readiness.confidence),
+            next_action="ask_followup",
+            missing_required_fields=_merge_strings(("supported location",), readiness.missing_required_fields),
+            hard_constraints=readiness.hard_constraints,
+            soft_preferences=readiness.soft_preferences,
+            safe_assumptions=readiness.safe_assumptions,
+            followup_questions=(
+                f"I currently only search {supported}. Which one is closest to where you're looking?",
+            ),
+            reasoning_summary="That location is outside the supported search markets.",
+        )
+
     if not _has_provider_routing_signal(intent):
         return SearchReadiness(
             ready_to_search=False,
@@ -308,7 +328,17 @@ def _dedupe_repeated_followups(
 
     latest = str(transcript[-1].get("content", "")).lower()
     previous = str(transcript[-2].get("content", "")).lower()
-    uncertainty_terms = ("don't know", "dont know", "not sure", "unsure", "no idea", "really know")
+    uncertainty_terms = (
+        "don't know",
+        "dont know",
+        "not sure",
+        "unsure",
+        "no idea",
+        "really know",
+        "whatever",
+        "flexible",
+        "open",
+    )
     user_is_uncertain = any(term in latest for term in uncertainty_terms)
     if not user_is_uncertain:
         return cleaned[:2]
@@ -318,10 +348,20 @@ def _dedupe_repeated_followups(
         question_text = question.lower()
         if "budget" in question_text and ("budget" in previous or "maximum" in previous):
             continue
+        if _topic_repeated(question_text, previous, ("room", "private", "shared", "entire", "place")):
+            continue
+        if _topic_repeated(question_text, previous, ("bedroom", "bedrooms", "bed count", "size")):
+            continue
+        if _topic_repeated(question_text, previous, ("move", "timing", "date", "start", "lease", "summer")):
+            continue
         filtered.append(question)
     if not filtered:
         filtered.append("Are you looking for a private room, shared room, or an entire place?")
     return tuple(filtered[:2])
+
+
+def _topic_repeated(question_text: str, previous_text: str, terms: Sequence[str]) -> bool:
+    return any(term in question_text for term in terms) and any(term in previous_text for term in terms)
 
 
 def _drop_neighborhood_followups(questions: Sequence[str]) -> tuple[str, ...]:

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Mapping
 
 from src.affordablehousing_agent.search_runner import (
     AffordableHousingSearchOptions,
@@ -14,6 +15,8 @@ from src.rentalsource_agent.search_runner import RentalSourceSearchOptions, run_
 from .config import PROCESSED_DIR, RAW_DIR, ensure_dirs
 from .search_runner import OhanaSearchOptions, run_ohana_search
 from .storage import write_csv, write_jsonl
+from src.housing_agent.listing_parsing import add_structured_listing_fields
+from src.housing_agent.post_filter import apply_post_filters
 
 try:
     from src.housing_agent.query_planner import plan_query as plan_provider_query_metadata
@@ -54,6 +57,8 @@ class ProviderSearchResult:
     error: str = ""
     filter_application: dict[str, Any] | None = None
     query_quality: dict[str, Any] | None = None
+    excluded_records: list[dict[str, Any]] | None = None
+    exclusion_counts: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,8 @@ class RoutedSearchResult:
     csv_output: Path | None
     debug_artifacts: dict[str, Path]
     errors: dict[str, str]
+    excluded_records: list[dict[str, Any]] | None = None
+    exclusion_counts: dict[str, int] | None = None
 
     @property
     def search_urls(self) -> dict[str, str]:
@@ -126,6 +133,18 @@ def _truthy_list(values: list[str] | None) -> bool:
     if not values:
         return False
     return any(str(value).strip().lower() not in {"", "0", "false", "no", "none"} for value in values)
+
+
+def _positive_pet_policy(values: list[str] | tuple[str, ...] | None) -> bool:
+    if not values:
+        return False
+    negative_terms = ("no pets", "no dogs", "no cats", "without pets", "pets prohibited", "not pet friendly")
+    for value in values:
+        text = str(value).strip().lower()
+        if not text or any(term in text for term in negative_terms):
+            continue
+        return True
+    return False
 
 
 def _plan_text(plan: Any) -> str:
@@ -197,10 +216,14 @@ def _planner_query_intent(plan: Any) -> dict[str, Any]:
         "min_price": _plan_value(plan, "min_price"),
         "max_price": _plan_value(plan, "max_price"),
         "bedrooms": _plan_value(plan, "num_bedrooms"),
+        "bedroom_min": _plan_value(plan, "bedroom_min"),
+        "bedroom_max": _plan_value(plan, "bedroom_max"),
         "bathrooms": _plan_value(plan, "num_bathrooms"),
+        "bathroom_min": _plan_value(plan, "bathroom_min"),
         "property_types": _plan_value(plan, "property_types") or (),
         "type_of_places": _plan_value(plan, "type_of_places") or (),
         "pet_policy": _plan_value(plan, "pet_policy") or (),
+        "pet_policy_negated": _plan_value(plan, "pet_policy_negated") or (),
         "furnished": bool(furnished_status) if furnished_status else None,
         "move_in_date": _plan_value(plan, "movein"),
         "move_out_date": _plan_value(plan, "moveout"),
@@ -215,6 +238,13 @@ def _planner_query_intent(plan: Any) -> dict[str, Any]:
         "utilities_included": "utilities included" in text,
         "washer_dryer": "washer dryer" in text or "washer-dryer" in text,
         "notes": _plan_value(plan, "notes") or (),
+        "amenities": _plan_value(plan, "amenities") or (),
+        "required_amenities": _plan_value(plan, "required_amenities") or (),
+        "preferred_amenities": _plan_value(plan, "preferred_amenities") or (),
+        "avoid_neighborhoods": _plan_value(plan, "avoid_neighborhoods") or (),
+        "keyword": _plan_value(plan, "keyword"),
+        "lease_length": _plan_value(plan, "lease_length"),
+        "commute_target": _plan_value(plan, "commute_target"),
     }
 
 
@@ -314,7 +344,7 @@ def _default_filter_application(provider: str, plan: Any) -> dict[str, Any]:
                 "page",
             ],
         )
-        if _truthy_list(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"):
+        if _positive_pet_policy(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"):
             source_applied.append("pets")
         _append_truthy_fields(plan, source_applied, ["photos", "verified", "featured"])
         _append_present_fields(plan, not_source_applied, ["movein", "moveout", "type_of_places", "furnished_status"])
@@ -325,7 +355,7 @@ def _default_filter_application(provider: str, plan: Any) -> dict[str, Any]:
             source_applied,
             ["location", "max_price", "num_bedrooms", "property_types"],
         )
-        if _truthy_list(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"):
+        if _positive_pet_policy(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"):
             source_applied.append("pet_policy")
 
         text = _plan_text(plan)
@@ -415,7 +445,7 @@ def _normalize_record(provider: str, record: dict[str, Any]) -> dict[str, Any]:
     normalized["availability"] = normalized.get("availability", "")
     normalized["price_min"] = normalized.get("price_min", "")
     normalized["price_max"] = normalized.get("price_max", "")
-    return normalized
+    return add_structured_listing_fields(normalized)
 
 
 def _normalize_coordinate_metadata(provider: str, record: dict[str, Any]) -> None:
@@ -465,16 +495,25 @@ def _default_coordinate_source(provider: str) -> str:
 def _provider_success_result(provider: str, result: Any, plan: Any) -> ProviderSearchResult:
     records = [_normalize_record(provider, record) for record in result.records]
     filter_application, query_quality = _provider_query_metadata(provider, plan)
+    post_filter_names = filter_application.get("post_filters") or []
+    post_filtered = apply_post_filters(
+        records,
+        _planner_query_intent(plan),
+        post_filter_names,
+        exclusion_source=f"{provider}_post_filter",
+    )
     return ProviderSearchResult(
         provider=provider,
-        records=records,
+        records=post_filtered.records,
         search_url=result.search_url,
         raw_output=result.raw_output,
         csv_output=result.csv_output,
         debug_artifacts=result.debug_artifacts,
         filter_application=filter_application,
         query_quality=query_quality,
-        status="ok" if records else "empty",
+        status="ok" if post_filtered.records else "empty",
+        excluded_records=post_filtered.excluded_records,
+        exclusion_counts=post_filtered.exclusion_counts,
     )
 
 
@@ -491,7 +530,17 @@ def _provider_failure_result(provider: str, exc: Exception, plan: Any | None = N
         query_quality=query_quality,
         status="failed",
         error=str(exc),
+        excluded_records=[],
+        exclusion_counts={},
     )
+
+
+def _plan_bedroom_value(plan: Any) -> int | None:
+    return _plan_value(plan, "num_bedrooms") or _plan_value(plan, "bedroom_min")
+
+
+def _plan_bathroom_value(plan: Any) -> float | None:
+    return _plan_value(plan, "num_bathrooms") or _plan_value(plan, "bathroom_min")
 
 
 def _run_provider(
@@ -514,10 +563,10 @@ def _run_provider(
                 moveout=_plan_value(plan, "moveout"),
                 property_types=_plan_value(plan, "property_types"),
                 type_of_places=_plan_value(plan, "type_of_places"),
-                num_bedrooms=_plan_value(plan, "num_bedrooms"),
+                num_bedrooms=_plan_bedroom_value(plan),
                 min_price=_plan_value(plan, "min_price"),
                 max_price=_plan_value(plan, "max_price"),
-                pet_policy=_plan_value(plan, "pet_policy"),
+                pet_policy=_plan_value(plan, "pet_policy") if _positive_pet_policy(_plan_value(plan, "pet_policy")) else None,
                 furnished_status=_plan_value(plan, "furnished_status"),
                 state_file=state_file,
                 selectors_file=selectors_file,
@@ -535,11 +584,11 @@ def _run_provider(
             RentalSourceSearchOptions(
                 location=_plan_value(plan, "location"),
                 property_types=_plan_value(plan, "property_types"),
-                num_bedrooms=_plan_value(plan, "num_bedrooms"),
-                num_bathrooms=_plan_value(plan, "num_bathrooms"),
+                num_bedrooms=_plan_bedroom_value(plan),
+                num_bathrooms=_plan_bathroom_value(plan),
                 min_price=_plan_value(plan, "min_price"),
                 max_price=_plan_value(plan, "max_price"),
-                pets=_truthy_list(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"),
+                pets=_positive_pet_policy(_plan_value(plan, "pet_policy")) or _truthy_plan_value(plan, "pets"),
                 photos=_truthy_plan_value(plan, "photos"),
                 verified=_truthy_plan_value(plan, "verified"),
                 featured=_truthy_plan_value(plan, "featured"),
@@ -557,31 +606,100 @@ def _run_provider(
 
     if provider == AFFORDABLEHOUSING:
         text = _plan_text(plan)
-        result = run_affordablehousing_search(
-            AffordableHousingSearchOptions(
-                location=_plan_value(plan, "location"),
-                property_types=_plan_value(plan, "property_types"),
-                num_bedrooms=_plan_value(plan, "num_bedrooms"),
-                min_price=_plan_value(plan, "min_price"),
-                max_price=_plan_value(plan, "max_price"),
-                pet_friendly=_truthy_list(_plan_value(plan, "pet_policy")),
-                section8="section 8" in text or "section8" in text,
-                income_restricted="income restricted" in text or "income-restricted" in text,
-                wheelchair_accessible="wheelchair" in text,
-                utilities_included="utilities included" in text,
-                washer_dryer="washer dryer" in text or "washer-dryer" in text,
-                state_file=None,
-                selectors_file=None,
-                max_listings=max_listings,
-                scrolls=scrolls,
-                headless=headless,
-                capture_detail_urls=capture_detail_urls,
-                fetch_listing_detail=fetch_listing_api,
+        property_types = _plan_value(plan, "property_types")
+        if isinstance(property_types, tuple):
+            property_types = list(property_types)
+        if property_types and len(property_types) > 1:
+            merged_records: list[dict[str, Any]] = []
+            debug_artifacts: dict[str, Path] = {}
+            search_urls: list[str] = []
+            raw_output: Path | None = None
+            csv_output: Path | None = None
+            seen: set[tuple[Any, ...]] = set()
+            for property_type in property_types:
+                result = run_affordablehousing_search(
+                    _affordable_options(
+                        plan,
+                        text=text,
+                        property_types=[property_type],
+                        max_listings=max_listings,
+                        scrolls=scrolls,
+                        headless=headless,
+                        capture_detail_urls=capture_detail_urls,
+                        fetch_listing_api=fetch_listing_api,
+                    )
+                )
+                raw_output = raw_output or result.raw_output
+                csv_output = csv_output or result.csv_output
+                search_urls.append(result.search_url)
+                for name, path in result.debug_artifacts.items():
+                    debug_artifacts[f"{property_type}_{name}"] = path
+                for record in result.records:
+                    key = _record_dedupe_key(record)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged_records.append(record)
+                    if len(merged_records) >= max_listings:
+                        break
+                if len(merged_records) >= max_listings:
+                    break
+            result = SimpleNamespace(
+                records=merged_records,
+                raw_output=raw_output,
+                csv_output=csv_output,
+                debug_artifacts=debug_artifacts,
+                search_url=", ".join(search_urls),
             )
-        )
+        else:
+            result = run_affordablehousing_search(
+                _affordable_options(
+                    plan,
+                    text=text,
+                    property_types=property_types,
+                    max_listings=max_listings,
+                    scrolls=scrolls,
+                    headless=headless,
+                    capture_detail_urls=capture_detail_urls,
+                    fetch_listing_api=fetch_listing_api,
+                )
+            )
         return _provider_success_result(provider, result, plan)
 
     raise ValueError(f"Unknown housing provider: {provider}")
+
+
+def _affordable_options(
+    plan: Any,
+    *,
+    text: str,
+    property_types: list[str] | None,
+    max_listings: int,
+    scrolls: int,
+    headless: bool,
+    capture_detail_urls: bool,
+    fetch_listing_api: bool,
+) -> AffordableHousingSearchOptions:
+    return AffordableHousingSearchOptions(
+        location=_plan_value(plan, "location"),
+        property_types=property_types,
+        num_bedrooms=_plan_bedroom_value(plan),
+        min_price=_plan_value(plan, "min_price"),
+        max_price=_plan_value(plan, "max_price"),
+        pet_friendly=_positive_pet_policy(_plan_value(plan, "pet_policy")),
+        section8="section 8" in text or "section8" in text,
+        income_restricted="income restricted" in text or "income-restricted" in text,
+        wheelchair_accessible="wheelchair" in text,
+        utilities_included="utilities included" in text,
+        washer_dryer="washer dryer" in text or "washer-dryer" in text,
+        state_file=None,
+        selectors_file=None,
+        max_listings=max_listings,
+        scrolls=scrolls,
+        headless=headless,
+        capture_detail_urls=capture_detail_urls,
+        fetch_listing_detail=fetch_listing_api,
+    )
 
 
 def run_provider_searches(
@@ -619,11 +737,20 @@ def run_provider_searches(
         except Exception as exc:
             provider_results.append(_provider_failure_result(provider, exc, plan))
 
-    records = [
+    records = _dedupe_records([
         record
         for result in provider_results
         for record in result.records
+    ])
+    excluded_records = [
+        record
+        for result in provider_results
+        for record in (result.excluded_records or [])
     ]
+    exclusion_counts: dict[str, int] = {}
+    for result in provider_results:
+        for key, count in (result.exclusion_counts or {}).items():
+            exclusion_counts[key] = exclusion_counts.get(key, 0) + count
     errors = {
         result.provider: result.error
         for result in provider_results
@@ -640,6 +767,8 @@ def run_provider_searches(
             csv_output=only.csv_output,
             debug_artifacts=only.debug_artifacts or {},
             errors=errors,
+            excluded_records=excluded_records,
+            exclusion_counts=exclusion_counts,
         )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -663,4 +792,29 @@ def run_provider_searches(
         csv_output=csv_output,
         debug_artifacts=debug_artifacts,
         errors=errors,
+        excluded_records=excluded_records,
+        exclusion_counts=exclusion_counts,
     )
+
+
+def _dedupe_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for record in records:
+        key = _record_dedupe_key(record)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(record)
+    return deduped
+
+
+def _record_dedupe_key(record: Mapping[str, Any]) -> tuple[Any, ...]:
+    url = record.get("listing_url") or record.get("detail_url") or record.get("url")
+    if url:
+        return ("url", str(url).strip().lower())
+    address = str(record.get("address") or record.get("listing_address") or record.get("location") or "").strip().lower()
+    price = record.get("price_max_int") or record.get("price_max") or record.get("price") or ""
+    bedrooms = record.get("bedroom_count") or record.get("bedrooms") or ""
+    title = str(record.get("title") or record.get("name") or "").strip().lower()
+    return ("listing", address, price, bedrooms, title)

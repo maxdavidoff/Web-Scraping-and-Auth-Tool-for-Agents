@@ -394,7 +394,7 @@ class InteractiveHousingAgentTests(unittest.TestCase):
         self.assertIn("Recommended:", execution.message)
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_listings"], 5)
-        self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource",))
+        self.assertEqual(runner.call_args.kwargs["providers"], ("rentalsource", "ohana"))
 
     def test_execute_command_repeats_agent_led_confirmation(self) -> None:
         runner = Mock(return_value=fake_router_result())

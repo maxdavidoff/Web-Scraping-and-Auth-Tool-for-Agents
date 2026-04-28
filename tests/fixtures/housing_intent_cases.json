@@ -5,7 +5,6 @@
     "model_response": {
       "location": "Boston, MA",
       "max_price": 1800,
-      "bedrooms": 1,
       "type_of_places": ["Private room"],
       "furnished": true,
       "move_in_date": null,
@@ -16,7 +15,6 @@
     "expected": {
       "location": "Boston, MA",
       "max_price": 1800,
-      "bedrooms": 1,
       "type_of_places": ["Private room"],
       "furnished": true,
       "intent_kind": "student_sublet"

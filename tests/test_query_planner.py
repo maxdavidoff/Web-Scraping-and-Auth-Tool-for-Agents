@@ -30,7 +30,7 @@ class QueryPlannerTests(unittest.TestCase):
             self.assertIn(filter_name, ohana.report.applied_at_source)
         self.assertIn("move_in_date", ohana.report.unknown_unverified)
         self.assertIn("type_of_places", rentalsource.report.unknown_unverified)
-        self.assertIn("furnished", rentalsource.report.unknown_unverified)
+        self.assertIn("furnished", rentalsource.report.post_filters)
 
     def test_general_rental_intent_ranks_rentalsource(self) -> None:
         intent = HousingSearchIntent(
@@ -62,7 +62,7 @@ class QueryPlannerTests(unittest.TestCase):
             "sort",
         ]:
             self.assertIn(filter_name, rentalsource.report.applied_at_source)
-        self.assertIn("bathrooms", ohana.report.unknown_unverified)
+        self.assertIn("bathrooms", ohana.report.post_filters)
         self.assertIn("sort", ohana.report.unknown_unverified)
 
     def test_multiple_roommates_rank_rentalsource_even_for_student_context(self) -> None:
@@ -145,7 +145,7 @@ class QueryPlannerTests(unittest.TestCase):
         self.assertTrue(any("minimum price" in warning for warning in affordable.report.warnings))
         self.assertIn("section8", rentalsource.report.unsupported)
 
-    def test_amenity_heavy_apartment_intent_uses_rentalsource_and_reports_unknown_filters(self) -> None:
+    def test_amenity_heavy_apartment_intent_uses_rentalsource_and_reports_post_filters(self) -> None:
         intent = HousingSearchIntent(
             location="New York, NY",
             min_price=2500,
@@ -178,7 +178,10 @@ class QueryPlannerTests(unittest.TestCase):
             "sort",
         ]:
             self.assertIn(filter_name, rentalsource.report.applied_at_source)
-        for filter_name in ["bedroom_max", "amenities", "move_in_date", "keyword"]:
+        for filter_name in ["amenities", "keyword"]:
+            self.assertIn(filter_name, rentalsource.report.post_filters)
+        self.assertIn("bedroom_max", rentalsource.report.post_filters)
+        for filter_name in ["move_in_date"]:
             self.assertIn(filter_name, rentalsource.report.unknown_unverified)
         self.assertIn("map_bounds", rentalsource.report.unsupported)
 

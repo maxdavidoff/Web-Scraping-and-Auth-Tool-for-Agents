@@ -9,6 +9,7 @@ from src.ohana_agent.provider_router import run_provider_searches
 
 from .intent_extractor import JsonChatClient, update_housing_intent
 from .listing_ranker import rank_listings
+from .post_filter import apply_hard_constraints
 from .provider_capabilities import AFFORDABLEHOUSING, OHANA, RENTALSOURCE
 from .readiness_evaluator import evaluate_search_readiness
 from .search_app import (
@@ -17,7 +18,7 @@ from .search_app import (
     query_plan_to_dict,
     user_visible_warnings,
 )
-from .types import HousingSearchIntent, ListingRankingResult, QueryPlan, SearchReadiness
+from .types import HousingSearchIntent, ListingRankingResult, QueryPlan, RankedListing, SearchReadiness
 
 
 AgentRunner = Callable[..., Any]
@@ -95,6 +96,8 @@ class InteractiveHousingAgent:
         self.latest_execution_result: Any | None = None
         self.latest_listing_ranking: ListingRankingResult | None = None
         self.latest_ranking_error: str = ""
+        self.latest_hard_excluded_records: list[dict[str, Any]] = []
+        self.latest_hard_exclusion_counts: dict[str, int] = {}
         self.pending_execution_confirmation = False
         self.proposed_execution_providers: tuple[str, ...] = ()
 
@@ -118,6 +121,8 @@ class InteractiveHousingAgent:
         self.latest_execution_result = None
         self.latest_listing_ranking = None
         self.latest_ranking_error = ""
+        self.latest_hard_excluded_records = []
+        self.latest_hard_exclusion_counts = {}
         previous_transcript = list(self.transcript)
         self.transcript.append({"role": "user", "content": message})
 
@@ -183,6 +188,8 @@ class InteractiveHousingAgent:
         self.latest_execution_result = None
         self.latest_listing_ranking = None
         self.latest_ranking_error = ""
+        self.latest_hard_excluded_records = []
+        self.latest_hard_exclusion_counts = {}
         self.pending_execution_confirmation = False
         self.proposed_execution_providers = ()
         return AgentTurn(
@@ -284,11 +291,14 @@ class InteractiveHousingAgent:
         provider_results = list(getattr(result, "provider_results", []) or [])
         records = list(getattr(result, "records", []) or [])
         errors = dict(getattr(result, "errors", {}) or {})
+        excluded_count = len(getattr(result, "excluded_records", []) or []) + len(self.latest_hard_excluded_records)
 
         lines = [
             "Search execution finished.",
             f"- Listings returned: {len(records)}",
         ]
+        if excluded_count:
+            lines.append(f"- Listings hidden by filters: {excluded_count}")
         if self.latest_readiness and not self.latest_readiness.ready_to_recommend:
             lines.append("- Recommendation confidence: limited; some important details were missing or assumptions were made.")
         if provider_results:
@@ -344,6 +354,14 @@ class InteractiveHousingAgent:
             lines.append("")
             lines.append("Errors:")
             lines.extend(f"- {provider}: {error}" for provider, error in errors.items())
+
+        if not records or (self.latest_hard_excluded_records and len(self.latest_hard_excluded_records) >= len(records)):
+            suggestion = _broaden_retry_suggestion(
+                self.latest_hard_exclusion_counts or getattr(result, "exclusion_counts", {}) or {},
+                self.current_intent,
+            )
+            if suggestion:
+                lines.extend(["", suggestion])
 
         return "\n".join(lines)
 
@@ -546,19 +564,36 @@ class InteractiveHousingAgent:
         self.latest_execution_result = result
 
         records = list(getattr(result, "records", []) or [])
+        hard_filtered = apply_hard_constraints(records, self.current_intent)
+        self.latest_hard_excluded_records = hard_filtered.excluded_records
+        self.latest_hard_exclusion_counts = hard_filtered.exclusion_counts
         self.latest_listing_ranking = None
         self.latest_ranking_error = ""
-        if records:
+        if hard_filtered.records:
             try:
-                self.latest_listing_ranking = self.listing_ranker(
+                ranking = self.listing_ranker(
                     self.current_intent,
                     self.latest_readiness,
-                    records,
+                    hard_filtered.records,
                     client=self.client,
                     model=self.model,
                 )
+                self.latest_listing_ranking = _merge_deterministic_exclusions(
+                    ranking,
+                    hard_filtered.excluded_records,
+                )
             except Exception as exc:
                 self.latest_ranking_error = str(exc)
+                if hard_filtered.excluded_records:
+                    self.latest_listing_ranking = _merge_deterministic_exclusions(
+                        ListingRankingResult(overall_summary="Listing ranking failed; deterministic exclusions are still shown."),
+                        hard_filtered.excluded_records,
+                    )
+        elif hard_filtered.excluded_records:
+            self.latest_listing_ranking = _merge_deterministic_exclusions(
+                ListingRankingResult(overall_summary="All returned listings were removed by hard constraints."),
+                hard_filtered.excluded_records,
+            )
 
         return AgentTurn(
             state="executed",
@@ -677,10 +712,21 @@ class InteractiveHousingAgent:
             return ()
         executable_providers, _skipped = executable_provider_plan(self.latest_plan)
         executable = set(executable_providers)
-        for provider_plan in self.latest_plan.provider_plans:
-            if provider_plan.provider in executable:
-                return (provider_plan.provider,)
-        return ()
+        candidates = [
+            provider_plan
+            for provider_plan in self.latest_plan.provider_plans
+            if provider_plan.provider in executable
+        ]
+        if not candidates:
+            return ()
+        top_score = candidates[0].score
+        threshold = top_score * 0.7 if top_score > 0 else top_score
+        selected = [
+            provider_plan.provider
+            for provider_plan in candidates
+            if provider_plan.score >= threshold
+        ]
+        return tuple(selected[:2])
 
     def _planning_payload(self) -> dict[str, Any] | None:
         if not self.current_intent or not self.latest_plan:
@@ -714,6 +760,8 @@ class InteractiveHousingAgent:
                     "error": getattr(provider_result, "error", ""),
                     "search_url": getattr(provider_result, "search_url", ""),
                     "records_count": len(getattr(provider_result, "records", []) or []),
+                    "excluded_records_count": len(getattr(provider_result, "excluded_records", []) or []),
+                    "exclusion_counts": _to_jsonable(getattr(provider_result, "exclusion_counts", None)),
                     "raw_output": _to_jsonable(getattr(provider_result, "raw_output", None)),
                     "csv_output": _to_jsonable(getattr(provider_result, "csv_output", None)),
                     "debug_artifacts": _to_jsonable(getattr(provider_result, "debug_artifacts", None)),
@@ -721,6 +769,10 @@ class InteractiveHousingAgent:
                 for provider_result in list(getattr(result, "provider_results", []) or [])
             ],
             "records": _to_jsonable(list(getattr(result, "records", []) or [])),
+            "excluded_records": _to_jsonable(list(getattr(result, "excluded_records", []) or [])),
+            "hard_excluded_records": _to_jsonable(self.latest_hard_excluded_records),
+            "exclusion_counts": _to_jsonable(getattr(result, "exclusion_counts", None)),
+            "hard_exclusion_counts": _to_jsonable(self.latest_hard_exclusion_counts),
             "errors": dict(getattr(result, "errors", {}) or {}),
         }
 
@@ -781,6 +833,8 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
     data = _to_jsonable(intent)
     labels = {
         "location": "Location",
+        "neighborhoods": "Neighborhood preferences",
+        "avoid_neighborhoods": "Avoid neighborhoods",
         "min_price": "Min price",
         "max_price": "Max price",
         "price_basis": "Price basis",
@@ -792,6 +846,7 @@ def _intent_summary_lines(intent: HousingSearchIntent) -> list[str]:
         "property_types": "Property types",
         "type_of_places": "Place type",
         "pet_policy": "Pet policy",
+        "pet_policy_negated": "Pet policy exclusions",
         "furnished": "Furnished",
         "move_in_date": "Move in",
         "move_out_date": "Move out",
@@ -870,6 +925,61 @@ def _ranked_listing_line(listing: Any) -> str:
     return f"{title} ({'; '.join(suffixes)})"
 
 
+def _merge_deterministic_exclusions(
+    ranking: ListingRankingResult,
+    excluded_records: Sequence[Mapping[str, Any]],
+) -> ListingRankingResult:
+    if not excluded_records:
+        return ranking
+    deterministic = tuple(_excluded_record_to_ranked_listing(record) for record in excluded_records)
+    return ListingRankingResult(
+        recommended=ranking.recommended,
+        needs_verification=ranking.needs_verification,
+        excluded=(*deterministic, *ranking.excluded),
+        overall_summary=ranking.overall_summary,
+        followup_suggestions=ranking.followup_suggestions,
+        raw_response=ranking.raw_response,
+    )
+
+
+def _excluded_record_to_ranked_listing(record: Mapping[str, Any]) -> RankedListing:
+    raw_reasons = record.get("excluded_reasons", ()) or ()
+    if isinstance(raw_reasons, str):
+        reasons = (raw_reasons,)
+    else:
+        reasons = tuple(str(reason) for reason in raw_reasons)
+    reason = str(record.get("excluded_reason") or (reasons[0] if reasons else "Hard constraint failed."))
+    return RankedListing(
+        listing_id=str(record.get("listing_id") or record.get("id") or ""),
+        title=str(record.get("title") or record.get("name") or "Untitled listing"),
+        url=str(record.get("listing_url") or record.get("url") or record.get("detail_url") or ""),
+        fit_score=0,
+        matched_constraints=(),
+        missing_info=(),
+        concerns=reasons or (reason,),
+        why_it_fits=reason,
+        provider=str(record.get("provider") or record.get("source") or ""),
+        raw=dict(record),
+    )
+
+
+def _broaden_retry_suggestion(
+    exclusion_counts: Mapping[str, int],
+    intent: HousingSearchIntent | None,
+) -> str:
+    if not exclusion_counts or not intent:
+        return ""
+    top_reason = max(exclusion_counts.items(), key=lambda item: item[1])[0]
+    if top_reason == "max_price" and intent.max_price:
+        relaxed = int(round(intent.max_price * 1.2 / 50) * 50)
+        return f"I found 0 listings under ${intent.max_price:,}. Want me to retry at ${relaxed:,}, or remove another requirement?"
+    if top_reason in {"bedrooms", "bedroom_min", "bedroom_max"}:
+        return "I found 0 listings after the bedroom filter. Want me to loosen the bedroom requirement?"
+    if top_reason in {"required_amenities", "washer_dryer", "utilities_included", "wheelchair_accessible"}:
+        return "I found 0 listings after amenity filters. Want me to retry without one must-have?"
+    return "I found 0 listings after applying filters. Want me to broaden the search?"
+
+
 def _why_line(reasons: Sequence[str]) -> str:
     profile_reasons = [reason for reason in reasons if "fit" in reason]
     if profile_reasons:
@@ -930,7 +1040,7 @@ def _one_line_intent(intent: HousingSearchIntent) -> str:
         pieces.append(f"with at least {intent.bedroom_min} bedroom(s)")
     if intent.furnished is True:
         pieces.append("furnished")
-    if intent.pet_policy:
+    if intent.pet_policy and not intent.pet_policy_negated:
         pieces.append("pet-friendly")
 
     return "I understand you’re looking for " + " ".join(pieces) + "."

@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
+from src.housing_agent.listing_parsing import add_structured_listing_fields
+
 PRICE_RE = re.compile(
     r"\$\s?[\d,]+(?:\s*-\s*\$\s?[\d,]+)?(?:\s*/\s?(?:mo|month|m|week|wk|night|day))?",
     re.I,
@@ -98,7 +100,7 @@ def normalize_listing(
     absolute_url = urljoin(base_url, url) if url else source_url
     images = [urljoin(base_url, image) for image in (image_urls or []) if image]
 
-    return {
+    record = {
         "id": stable_id(url, raw_text_clean),
         "source": "affordablehousing",
         "title": clean_text(title) or guess_title(raw_text),
@@ -114,3 +116,4 @@ def normalize_listing(
         "scraped_at": datetime.now(timezone.utc).isoformat(),
         "raw_text": raw_text_clean,
     }
+    return add_structured_listing_fields(record)

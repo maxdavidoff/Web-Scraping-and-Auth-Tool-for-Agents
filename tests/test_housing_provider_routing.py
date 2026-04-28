@@ -240,6 +240,70 @@ class HousingProviderRoutingTests(unittest.TestCase):
         self.assertEqual(len(result.records), 1)
         self.assertIn("rentalsource", result.errors)
 
+    def test_rentalsource_bedroom_range_passes_min_and_reports_max_post_filter(self) -> None:
+        plan = make_plan(
+            providers=["rentalsource"],
+            bedroom_min=1,
+            bedroom_max=2,
+            property_types=["Apartment"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ohana_agent.provider_router.run_rentalsource_search") as run_rentalsource:
+                run_rentalsource.return_value = fake_result(
+                    "rentalsource",
+                    [
+                        {"source": "rentalsource", "title": "One bed", "bedrooms": "1 bed"},
+                        {"source": "rentalsource", "title": "Three bed", "bedrooms": "3 beds"},
+                    ],
+                    tmpdir,
+                )
+
+                result = run_provider_searches(plan, providers=plan.providers)
+
+        options = run_rentalsource.call_args.args[0]
+        self.assertEqual(options.num_bedrooms, 1)
+        self.assertEqual([record["title"] for record in result.records], ["One bed"])
+        self.assertEqual(result.excluded_records[0]["title"], "Three bed")
+        provider_result = result.provider_results[0]
+        self.assertIn("bedroom_min", provider_result.filter_application["source_applied"])
+        self.assertIn("bedroom_max", provider_result.filter_application["post_filters"])
+
+    def test_affordablehousing_runs_multiple_property_types_and_dedupes(self) -> None:
+        plan = make_plan(
+            providers=["affordablehousing"],
+            property_types=["Apartment", "House"],
+            max_listings=5,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ohana_agent.provider_router.run_affordablehousing_search") as run_affordable:
+                run_affordable.side_effect = [
+                    fake_result(
+                        "affordablehousing",
+                        [
+                            {"source": "affordablehousing", "title": "Shared", "url": "https://example.com/1"},
+                            {"source": "affordablehousing", "title": "Apartment only", "url": "https://example.com/2"},
+                        ],
+                        tmpdir,
+                    ),
+                    fake_result(
+                        "affordablehousing",
+                        [
+                            {"source": "affordablehousing", "title": "Shared duplicate", "url": "https://example.com/1"},
+                            {"source": "affordablehousing", "title": "House only", "url": "https://example.com/3"},
+                        ],
+                        tmpdir,
+                    ),
+                ]
+
+                result = run_provider_searches(plan, providers=plan.providers, max_listings=5)
+
+        self.assertEqual(run_affordable.call_count, 2)
+        called_types = [call.args[0].property_types for call in run_affordable.call_args_list]
+        self.assertEqual(called_types, [["Apartment"], ["House"]])
+        self.assertEqual([record["title"] for record in result.records], ["Shared", "Apartment only", "House only"])
+
 
 if __name__ == "__main__":
     unittest.main()

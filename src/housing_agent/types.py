@@ -43,6 +43,7 @@ class HousingSearchIntent:
     property_types: tuple[str, ...] = ()
     type_of_places: tuple[str, ...] = ()
     pet_policy: tuple[str, ...] = ()
+    pet_policy_negated: tuple[str, ...] = ()
     furnished: bool | None = None
     move_in_date: str | None = None
     move_out_date: str | None = None
@@ -201,9 +202,19 @@ class NormalizedListing:
     price: str = ""
     price_min: int | None = None
     price_max: int | None = None
+    price_min_int: int | None = None
+    price_max_int: int | None = None
     bedrooms: str = ""
+    bedroom_count: float | None = None
+    bedroom_min_count: float | None = None
+    bedroom_max_count: float | None = None
     bathrooms: str = ""
+    bathroom_count: float | None = None
+    bathroom_min_count: float | None = None
+    bathroom_max_count: float | None = None
     property_type: str = ""
     availability: str = ""
+    available_from_iso: str | None = None
+    available_to_iso: str | None = None
     image_urls: tuple[str, ...] = ()
     raw: Mapping[str, Any] = field(default_factory=dict)
