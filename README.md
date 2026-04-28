@@ -32,6 +32,8 @@ ohana_search_agent/
     debug/                        # screenshot + HTML snapshots
 
   src/housing_agent/
+    intent_extractor.py           # Mistral-backed provider-neutral intent extraction
+    llm_client.py                 # small stdlib Mistral chat-completion client
     provider_capabilities.py      # provider capability matrix
     query_planner.py              # deterministic query planning/reporting
     types.py                      # shared query-planning dataclasses
@@ -68,6 +70,13 @@ Optional: copy `.env.example` to `.env` and edit defaults:
 
 ```bash
 cp .env.example .env
+```
+
+For provider-neutral intent extraction, set:
+
+```bash
+MISTRAL_API_KEY=...
+MISTRAL_MODEL=mistral-small-latest
 ```
 
 ## Step 1 — Save your Ohana login session
@@ -138,7 +147,7 @@ If the script cannot find the search box, it will ask you to do the search manua
 
 ## Query planning layer
 
-The old direct LLM-to-scraper bridge has been removed. The current reusable integration point is deterministic: build a structured intent or plan, inspect provider capability/query quality, then call the router explicitly.
+The old direct LLM-to-scraper bridge has been removed. The current reusable integration point is layered: extract a provider-neutral structured intent, inspect provider capability/query quality, then call the router explicitly.
 
 ```python
 from src.housing_agent import HousingSearchIntent, plan_query
@@ -157,7 +166,25 @@ print(query_plan.ranked_provider_names)
 print(query_plan.for_provider("ohana").report.applied_at_source)
 ```
 
-Provider scraping still happens through provider-specific CLIs or the deterministic router in `src.ohana_agent.provider_router`. A future LLM layer should target this capability/query-planning API rather than calling scrapers directly.
+Provider scraping still happens through provider-specific CLIs or the deterministic router in `src.ohana_agent.provider_router`. Any future conversational agent should target this capability/query-planning API rather than calling scrapers directly.
+
+To use Mistral for intent extraction without scraping:
+
+```bash
+python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
+```
+
+The CLI prints the extracted `HousingSearchIntent` and the provider query plan. Live Mistral tests are opt-in:
+
+```bash
+RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY=... python3 -m unittest tests.test_intent_extractor -v
+```
+
+or:
+
+```bash
+python3 run_live_llm_tests.py
+```
 
 ## Updating selectors
 

@@ -21,6 +21,20 @@ Run only the live scrape tests locally:
 python3 run_live_scrape_tests.py --install-chromium
 ```
 
+Run mocked Mistral intent extraction tests. Live LLM calls are skipped unless
+you set `RUN_LIVE_LLM_TESTS=1` and `MISTRAL_API_KEY`:
+
+```bash
+python3 -m unittest tests.test_intent_extractor -v
+```
+
+Run the live Mistral intent extraction test locally:
+
+```bash
+export MISTRAL_API_KEY="..."
+python3 run_live_llm_tests.py
+```
+
 Save login:
 
 ```bash
@@ -39,6 +53,13 @@ Check results:
 data/processed/
 data/raw/
 data/debug/
+```
+
+Extract and plan a provider-neutral housing intent without scraping:
+
+```bash
+export MISTRAL_API_KEY="..."
+python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
 ```
 
 AffordableHousing.com:
