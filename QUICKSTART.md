@@ -76,6 +76,14 @@ Try the interactive chat agent:
 python run_housing_chat.py --max-listings 5
 ```
 
+Try the local browser UI:
+
+```bash
+python run_housing_ui.py --max-listings 5 --fetch-listing-api
+```
+
+Then open `http://127.0.0.1:8765`. The UI shows the chat, intent, provider plan, execution state, listing cards, listing images, output files, and scraper screenshots from `data/debug/`.
+
 The chat agent:
 
 1. updates a provider-neutral housing intent from the conversation,
