@@ -62,6 +62,18 @@ export MISTRAL_API_KEY="..."
 python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
 ```
 
+Plan the user-facing search experience without scraping:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
+```
+
+Execute only when you explicitly want live scrapers to run:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
+```
+
 AffordableHousing.com:
 
 ```bash

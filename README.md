@@ -174,7 +174,23 @@ To use Mistral for intent extraction without scraping:
 python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
 ```
 
-The CLI prints the extracted `HousingSearchIntent` and the provider query plan. Live Mistral tests are opt-in:
+The CLI prints the extracted `HousingSearchIntent` and the provider query plan.
+
+For the product-facing search flow, use `run_housing_search.py`. By default it only plans the search and prints the extracted intent, ranked providers, query quality, source-applied filters, unsupported/unverified filters, and execution warnings:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
+```
+
+Scraping is opt-in:
+
+```bash
+python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
+```
+
+The execution path filters out providers that are not executable, including the staged Apartments.com capability profile.
+
+Live Mistral tests are opt-in:
 
 ```bash
 RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY=... python3 -m unittest tests.test_intent_extractor -v

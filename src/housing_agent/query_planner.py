@@ -161,6 +161,9 @@ def score_provider_query(
     if profile_bonus:
         score += profile_bonus
         reasons.append(profile_reason)
+    elif capabilities.specialized:
+        score -= 3.0
+        reasons.append("specialized provider without matching intent (-3)")
 
     if capabilities.experimental:
         score -= 1.0
