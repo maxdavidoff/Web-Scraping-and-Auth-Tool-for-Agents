@@ -4,7 +4,7 @@ This is a small, test-first housing search project for logging into housing prov
 
 It intentionally does **not** bypass Cloudflare, CAPTCHAs, login protections, private APIs, or rate limits. Use it only with an account you are allowed to use and only at low, human-like volume.
 
-Supported search markets are currently Boston, MA; New York, NY; Washington, DC; and Philadelphia, PA. Known neighborhoods inside those markets, such as University City for Philadelphia, are mapped back to the supported city search.
+Supported search markets are currently Boston, MA; New York, NY; Washington, DC; and Philadelphia, PA.
 
 ## What it does
 
@@ -29,46 +29,86 @@ The LLM is used for topic checks, language understanding, search readiness, and 
 ## Folder structure
 
 ```text
-ohana_search_agent/
+(project root)/
   auth/
     ohana_state.json              # created after login; gitignored
+    affordablehousing_state.json  # created after login; gitignored
+    rentalsource_state.json       # created after login; gitignored
 
   data/
-    raw/                          # JSONL results
-    processed/                    # CSV results
+    raw/                          # JSONL results (housing_provider_results_*.jsonl)
+    processed/                    # CSV results  (housing_provider_results_*.csv)
     debug/                        # screenshot + HTML snapshots
 
-  src/housing_agent/
-    intent_extractor.py           # Mistral-backed provider-neutral intent extraction
-    readiness_evaluator.py        # Mistral-backed search readiness/follow-up policy
-    listing_ranker.py             # Mistral-backed listing fit ranking after execution
-    llm_client.py                 # small stdlib Mistral chat-completion client
-    provider_capabilities.py      # provider capability matrix
-    query_planner.py              # deterministic query planning/reporting
-    search_app.py                 # one-shot plan/execute app API
-    interactive_agent.py          # stateful terminal chat controller
-    ui_server.py                  # local stdlib web UI server
-    ui_static/                    # HTML/CSS/JS for the browser UI
-    types.py                      # shared intent/readiness/query/ranking dataclasses
+  src/
+    housing_agent/
+      intent_extractor.py         # Mistral-backed provider-neutral intent extraction
+      intent_guards.py            # hard-constraint guards on extracted intent
+      readiness_evaluator.py      # Mistral-backed search readiness/follow-up policy
+      listing_ranker.py           # Mistral-backed listing fit ranking after execution
+      listing_parsing.py          # normalizes raw listing records for ranking
+      llm_client.py               # small stdlib Mistral chat-completion client
+      location_scope.py           # maps user location strings to supported markets
+      post_filter.py              # deterministic hard-constraint post-filter
+      provider_capabilities.py    # provider capability matrix
+      query_planner.py            # deterministic query planning/reporting
+      search_app.py               # one-shot plan/execute app API
+      interactive_agent.py        # stateful terminal chat controller
+      topic_guard.py              # on-topic check for incoming messages
+      ui_server.py                # local stdlib web UI server
+      ui_static/                  # HTML/CSS/JS for the browser UI
+      types.py                    # shared intent/readiness/query/ranking dataclasses
 
-  src/ohana_agent/
-    browser.py                    # Playwright browser/session helpers
-    config.py                     # settings and paths
-    extractor.py                  # DOM extraction logic
-    provider_router.py            # deterministic multi-provider router
-    parsing.py                    # field normalization / regex guesses
-    search_runner.py              # importable Ohana scraping tool
-    storage.py                    # JSONL + CSV writers
+    ohana_agent/
+      browser.py                  # Playwright browser/session helpers
+      config.py                   # settings and paths
+      extractor.py                # DOM extraction logic
+      listing_api.py              # Ohana detail-API coordinate fetcher
+      provider_router.py          # deterministic multi-provider router
+      parsing.py                  # field normalization / regex guesses
+      search_runner.py            # importable Ohana scraping tool
+      search_url.py               # Ohana URL builder
+      storage.py                  # JSONL + CSV writers
 
-  run_housing_chat.py             # interactive agent-user loop
-  run_housing_ui.py               # local browser UI
+    affordablehousing_agent/
+      browser.py
+      config.py
+      detail.py                   # detail-page address/coordinate enrichment
+      extractor.py
+      parsing.py
+      search_runner.py
+      search_url.py               # AffordableHousing.com SEO URL builder
+      storage.py
+
+    rentalsource_agent/
+      browser.py
+      config.py
+      detail.py                   # detail-page JSON-LD enrichment
+      extractor.py
+      parsing.py
+      search_runner.py
+      search_url.py               # RentalSource URL builder
+      storage.py
+
+    supported_locations.py        # canonical supported city/neighborhood map
+
+  tests/                          # unittest suite
+
+  run_housing_ui.py               # local browser UI (opens http://127.0.0.1:8765)
+  run_housing_chat.py             # interactive agent-user loop (terminal)
   run_housing_search.py           # one-shot plan/execute flow
   run_housing_intent.py           # intent extraction + query plan only
+  run_ohana_search.py             # run/extract Ohana search directly
+  run_rentalsource_search.py      # run/extract RentalSource search directly
+  run_affordablehousing_search.py # run/extract AffordableHousing search directly
   save_ohana_login.py             # save Ohana login session
-  run_ohana_search.py             # run/extract Ohana search
-  run_rentalsource_search.py      # run/extract RentalSource search
-  run_affordablehousing_search.py # run/extract AffordableHousing search
-  selectors.example.json          # editable selectors
+  save_rentalsource_login.py      # save RentalSource login session
+  save_affordablehousing_login.py # save AffordableHousing login session
+  demo_agent_components.py        # standalone component demo
+  selectors.ohana.json            # editable Ohana DOM selectors
+  selectors.affordablehousing.json
+  selectors.rentalsource.json
+  selectors.example.json          # template / reference
   requirements.txt
   .env.example
   .gitignore
@@ -91,20 +131,78 @@ Optional: copy `.env.example` to `.env` and edit defaults:
 cp .env.example .env
 ```
 
-For provider-neutral intent extraction, set:
+Export your Mistral API key before running any LLM-backed command:
 
 ```bash
-MISTRAL_API_KEY=...
-MISTRAL_MODEL=mistral-small-latest
+export MISTRAL_API_KEY="your-key-here"
+```
+
+For the model, the default is `mistral-small-latest`. You can override it:
+
+```bash
+export MISTRAL_MODEL=mistral-small-latest
 ```
 
 No extra Python package is required for the LLM layers; the project uses the small stdlib Mistral client in `src/housing_agent/llm_client.py`.
 
-## Interactive housing chat
+## Before starting the UI — warm up each provider
 
-Use the chat agent to experience the product flow:
+Run a quick extraction from each provider before starting the chat UI. This verifies browser sessions and populates `data/` so the UI has something to show immediately.
+
+**Ohana** (requires a saved login session — see [Step 1](#step-1--save-your-ohana-login-session)):
 
 ```bash
+python run_ohana_search.py \
+  --search-url "https://liveohana.ai/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+**AffordableHousing.com** (login optional for public searches):
+
+```bash
+python run_affordablehousing_search.py \
+  --search-url "https://www.affordablehousing.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+**RentalSource** (public; no login needed):
+
+```bash
+python run_rentalsource_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --max-listings 20
+```
+
+All three write results to `data/raw/`, `data/processed/`, and `data/debug/`.
+
+## Local browser UI
+
+Once the providers have run at least once, start the UI:
+
+```bash
+export MISTRAL_API_KEY="your-key-here"
+python run_housing_ui.py --max-listings 5 --fetch-listing-api
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The UI wraps `InteractiveHousingAgent` and does not call provider scrapers directly. A search only runs after the agent has proposed a plan and the user clicks `Run Search` or replies `yes`. The UI renders artifact links from `data/debug/`, `data/raw/`, and `data/processed/`, including provider search-page screenshots saved by the scrapers.
+
+## Interactive housing chat (terminal)
+
+Use the chat agent for the full product flow without a browser:
+
+```bash
+export MISTRAL_API_KEY="your-key-here"
 python run_housing_chat.py --max-listings 5
 ```
 
@@ -114,7 +212,7 @@ Example:
 > i need to find somewhere to stay for a summer program at upenn
 ```
 
-The agent updates a merged `HousingSearchIntent`, evaluates whether enough information is present, asks at most a small number of useful follow-up questions, then proposes the best provider to run first. Execution requires a clear confirmation such as:
+The agent updates a merged `HousingSearchIntent`, evaluates whether enough information is present, asks at most a small number of useful follow-up questions, then proposes the best provider to run first. Execution requires a clear confirmation:
 
 ```text
 yes
@@ -135,34 +233,20 @@ quit
 
 `json` is debug-only and shows the current intent, readiness object, provider plan, pending confirmation state, execution result, and listing ranking state.
 
-## Local browser UI
-
-Run the browser UI when you want the final user-facing loop with chat, structured intent, provider plan, execution status, listing cards, listing images, output files, and generated scraper screenshots:
-
-```bash
-python run_housing_ui.py --max-listings 5 --fetch-listing-api
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8765
-```
-
-The UI wraps `InteractiveHousingAgent`; it does not call provider scrapers directly. A search only runs after the agent has proposed a plan and the user clicks `Run Search` or replies `yes`. The UI renders artifact links from `data/debug/`, `data/raw/`, and `data/processed/`, including provider search-page screenshots saved by the scrapers.
-
 ## Agent architecture
 
 The safe agent flow is:
 
 ```text
 user conversation
-  -> LLM checks whether the latest message is rental-housing related
+  -> LLM topic guard: is this message rental-housing related?
   -> LLM updates full merged HousingSearchIntent
+  -> intent guards apply hard constraints
   -> LLM evaluates SearchReadiness
   -> deterministic query planner ranks providers and explains filter application
   -> user confirms execution
   -> deterministic provider router runs executable scrapers
+  -> deterministic post-filter applies hard constraints to returned listings
   -> LLM ranks returned listings against the intent
 ```
 
@@ -212,8 +296,8 @@ When the browser opens:
 Outputs appear in:
 
 ```text
-data/raw/ohana_results_YYYYMMDD_HHMMSS.jsonl
-data/processed/ohana_results_YYYYMMDD_HHMMSS.csv
+data/raw/housing_provider_results_YYYYMMDD_HHMMSS.jsonl
+data/processed/housing_provider_results_YYYYMMDD_HHMMSS.csv
 data/debug/search_page.png
 data/debug/search_page.html
 ```
@@ -224,27 +308,27 @@ After manual extraction works, you can try automated search input filling:
 
 ```bash
 PYTHONPATH=src python -u run_ohana_search.py \
---location "Boston, MA, USA" \
---movein "May 1, 2026" \
---moveout "May 31, 2026" \
---property-types Apartment House \
---type-of-places "Private room" \
---num-bedrooms 1 \
---min-price 1000 \
---max-price 3000 \
---selectors-file selectors.ohana.json \
---max-listings 15 \
---fetch-listing-api \
---scrolls 0
+  --location "Boston, MA, USA" \
+  --movein "May 1, 2026" \
+  --moveout "May 31, 2026" \
+  --property-types Apartment House \
+  --type-of-places "Private room" \
+  --num-bedrooms 1 \
+  --min-price 1000 \
+  --max-price 3000 \
+  --selectors-file selectors.ohana.json \
+  --max-listings 15 \
+  --fetch-listing-api \
+  --scrolls 0
 ```
 
-If the script cannot find the search box, it will ask you to do the search manually. That means you need to update `selectors.example.json`.
+If the script cannot find the search box, it will ask you to do the search manually — update `selectors.ohana.json` if that happens.
 
 Ohana only writes exact coordinates when `--fetch-listing-api` is enabled and a real `/listing/...` detail URL is available. Each output record includes `coordinates_status` and `coordinates_source` so missing coordinates are explicit instead of silent.
 
 ## Query planning layer
 
-The old direct LLM-to-scraper bridge has been removed. The current reusable integration point is layered: extract a provider-neutral structured intent, inspect provider capability/query quality, then call the router explicitly.
+The reusable integration point is layered: extract a provider-neutral structured intent, inspect provider capability/query quality, then call the router explicitly.
 
 ```python
 from src.housing_agent import HousingSearchIntent, plan_query
@@ -268,10 +352,9 @@ Provider scraping still happens through provider-specific CLIs or the determinis
 To use Mistral for intent extraction without scraping:
 
 ```bash
+export MISTRAL_API_KEY="your-key-here"
 python run_housing_intent.py "furnished private room in Boston under $1800 for June 2026"
 ```
-
-The CLI prints the extracted `HousingSearchIntent` and the provider query plan.
 
 For the product-facing search flow, use `run_housing_search.py`. By default it only plans the search and prints the extracted intent, ranked providers, query quality, source-applied filters, unsupported/unverified filters, and execution warnings:
 
@@ -279,39 +362,94 @@ For the product-facing search flow, use `run_housing_search.py`. By default it o
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer"
 ```
 
-For a back-and-forth terminal experience, use the interactive chat agent:
-
-```bash
-python run_housing_chat.py --max-listings 5
-```
-
-The chat agent maintains intent across turns, asks follow-up questions when the readiness layer says the search would otherwise be weak, proposes the best provider to search first, and only executes after the user confirms with a reply like `yes`.
-
 Scraping is opt-in:
 
 ```bash
 python run_housing_search.py "I need a furnished private room in Boston under 1800 for the summer" --execute --max-listings 5
 ```
 
-The execution path filters out any provider that is not wired to an executable scraper.
+## AffordableHousing.com tool
 
-Live Mistral tests are opt-in:
-
-```bash
-RUN_LIVE_LLM_TESTS=1 MISTRAL_API_KEY=... python3 -m unittest tests.test_intent_extractor -v
-```
-
-or:
+Save an optional login session (public searches work without it):
 
 ```bash
-python3 run_live_llm_tests.py
+python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
 ```
 
-Live browser scrape tests are opt-in:
+Run a manual extraction test:
 
 ```bash
-RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
+python run_affordablehousing_search.py \
+  --search-url "https://www.affordablehousing.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
 ```
+
+Or build an AffordableHousing.com SEO search URL from CLI filters:
+
+```bash
+python run_affordablehousing_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --selectors-file selectors.affordablehousing.json \
+  --max-listings 20
+```
+
+To enrich extracted cards with exact detail-page address and coordinates:
+
+```bash
+python run_affordablehousing_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --max-listings 10 \
+  --fetch-listing-detail
+```
+
+Outputs appear in `data/raw/`, `data/processed/`, and `data/debug/` with an `affordablehousing` prefix in the debug files.
+
+## RentalSource tool
+
+Save an optional login session (listings are public):
+
+```bash
+python save_rentalsource_login.py --start-url "https://www.rentalsource.com/"
+```
+
+Run a filtered search:
+
+```bash
+python run_rentalsource_search.py \
+  --location "Boston, MA" \
+  --property-types Apartment \
+  --num-bedrooms 1 \
+  --num-bathrooms 1 \
+  --min-price 1000 \
+  --max-price 3000 \
+  --sort price \
+  --max-listings 20
+```
+
+The same manual-search and keep-open workflow works here:
+
+```bash
+python run_rentalsource_search.py \
+  --search-url "https://www.rentalsource.com/boston-ma/" \
+  --manual-search \
+  --max-listings 20 \
+  --keep-open
+```
+
+To enrich extracted cards with detail-page JSON-LD fields (exact address, latitude, longitude, beds, baths, price range):
+
+```bash
+python run_rentalsource_search.py \
+  --location "Boston, MA" \
+  --max-listings 10 \
+  --fetch-listing-detail
+```
+
+Coordinate fields are explicit in all provider outputs: `listing_latitude`, `listing_longitude`, `coordinates_status`, `coordinates_source`.
 
 ## Updating selectors
 
@@ -321,7 +459,7 @@ Open:
 data/debug/search_page.html
 ```
 
-Find the listing card HTML and update `selectors.example.json`, especially:
+Find the listing card HTML and update the relevant selectors file (`selectors.ohana.json`, `selectors.affordablehousing.json`, or `selectors.rentalsource.json`), especially:
 
 ```json
 "result_card_selectors": [
@@ -331,10 +469,6 @@ Find the listing card HTML and update `selectors.example.json`, especially:
   "article"
 ]
 ```
-
-The extraction logic is intentionally heuristic at first. It tries to identify likely cards, then guesses fields like title, price, bedrooms, dates, URL, and image URLs.
-
-For a more accurate second version, inspect the debug HTML and replace the generic selectors with exact Ohana selectors.
 
 ## Example output record
 
@@ -352,6 +486,42 @@ For a more accurate second version, inspect the debug HTML and replace the gener
   "scraped_at": "2026-04-26T12:00:00+00:00",
   "raw_text": "Full visible listing card text..."
 }
+```
+
+## Automated tests
+
+Run the automated tests with:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m playwright install chromium
+python3 -m unittest discover -s tests -v
+```
+
+Live browser scrape tests are skipped by default. To opt in:
+
+```bash
+RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
+```
+
+Live Mistral tests are opt-in:
+
+```bash
+export MISTRAL_API_KEY="your-key-here"
+RUN_LIVE_LLM_TESTS=1 python3 -m unittest tests.test_intent_extractor -v
+```
+
+Or run all live tests at once:
+
+```bash
+export MISTRAL_API_KEY="your-key-here"
+python3 run_live_llm_tests.py
+```
+
+For a narrower local readiness check that runs only the live scrape tests:
+
+```bash
+python3 run_live_scrape_tests.py --install-chromium
 ```
 
 ## Common issues
@@ -377,161 +547,27 @@ data/debug/search_page.html
 
 If the screenshot does not show results, run again with `--manual-search` and make sure results are visible before pressing ENTER.
 
-If the screenshot shows results but CSV is empty, update `result_card_selectors` in `selectors.example.json`.
+If the screenshot shows results but CSV is empty, update `result_card_selectors` in the relevant selectors file.
 
 ### Login expired
 
-Run:
+Run the appropriate save-login script and log in again:
 
 ```bash
 python save_ohana_login.py
+python save_affordablehousing_login.py
+python save_rentalsource_login.py
 ```
-
-and log in again.
 
 ## Recommended testing workflow
 
 1. Run `save_ohana_login.py`.
 2. Run `run_ohana_search.py --manual-search --keep-open`.
-3. Check the CSV.
-4. Check `data/debug/search_page.html` if extraction is wrong.
-5. Tighten selectors.
-6. Only then try automated search.
-
-## Automated tests
-
-Run the automated tests with:
-
-```bash
-python3 -m pip install -r requirements.txt
-python3 -m playwright install chromium
-python3 -m unittest discover -s tests -v
-```
-
-Live browser scrape tests are skipped by default. To opt in:
-
-```bash
-RUN_LIVE_SCRAPE_TESTS=1 python3 -m unittest discover -s tests -v
-```
-
-For a narrower local readiness check that runs only the live scrape tests:
-
-```bash
-python3 run_live_scrape_tests.py --install-chromium
-```
-
-Use `--all` if you want full unittest discovery with live tests enabled.
-
-## AffordableHousing.com tool
-
-This repo also includes a parallel AffordableHousing.com tool with the same manual-first workflow:
-
-```bash
-python save_affordablehousing_login.py --start-url "https://www.affordablehousing.com/"
-```
-
-Login is optional for public searches, but this saves a browser session to:
-
-```text
-auth/affordablehousing_state.json
-```
-
-Run a manual extraction test:
-
-```bash
-python run_affordablehousing_search.py \
-  --search-url "https://www.affordablehousing.com/boston-ma/" \
-  --manual-search \
-  --max-listings 20 \
-  --keep-open
-```
-
-Or build an AffordableHousing.com SEO search URL from CLI filters:
-
-```bash
-python run_affordablehousing_search.py \
-  --location "Boston, MA" \
-  --property-types Apartment \
-  --selectors-file selectors.affordablehousing.json \
-  --max-listings 20
-```
-
-To enrich extracted cards with exact detail-page address and coordinates when available:
-
-```bash
-python run_affordablehousing_search.py \
-  --location "Boston, MA" \
-  --property-types Apartment \
-  --max-listings 10 \
-  --fetch-listing-detail
-```
-
-Outputs appear in:
-
-```text
-data/raw/affordablehousing_results_YYYYMMDD_HHMMSS.jsonl
-data/processed/affordablehousing_results_YYYYMMDD_HHMMSS.csv
-data/debug/affordablehousing_search_page.png
-data/debug/affordablehousing_search_page.html
-```
-
-If extraction breaks, inspect `data/debug/affordablehousing_search_page.html` and update `selectors.affordablehousing.json`.
-
-AffordableHousing detail enrichment validates that detail URLs belong to `affordablehousing.com` before fetching them. Coordinate fields are written as `listing_latitude`, `listing_longitude`, `coordinates_status`, and `coordinates_source`.
-
-## RentalSource tool
-
-This repo also includes a parallel RentalSource tool with the same browser/session/result-saving workflow:
-
-```bash
-python save_rentalsource_login.py --start-url "https://www.rentalsource.com/"
-```
-
-RentalSource listings are public, so saving a login session is optional unless you need account-specific behavior. Run a filtered search like this:
-
-```bash
-python run_rentalsource_search.py \
-  --location "Boston, MA" \
-  --property-types Apartment \
-  --num-bedrooms 1 \
-  --num-bathrooms 1 \
-  --min-price 1000 \
-  --max-price 3000 \
-  --sort price \
-  --max-listings 20
-```
-
-The RentalSource script accepts the same manual-search and keep-open workflow:
-
-```bash
-python run_rentalsource_search.py \
-  --search-url "https://www.rentalsource.com/boston-ma/" \
-  --manual-search \
-  --max-listings 20 \
-  --keep-open
-```
-
-To enrich extracted cards with detail-page JSON-LD fields such as exact address, latitude, longitude, beds, baths, and price range:
-
-```bash
-python run_rentalsource_search.py \
-  --location "Boston, MA" \
-  --max-listings 10 \
-  --fetch-listing-detail
-```
-
-Without detail enrichment, RentalSource records still include `coordinates_status=not_requested`. With enrichment, coordinates come from detail-page JSON-LD when present.
-
-RentalSource outputs appear beside the other outputs:
-
-```text
-data/raw/rentalsource_results_YYYYMMDD_HHMMSS.jsonl
-data/processed/rentalsource_results_YYYYMMDD_HHMMSS.csv
-data/debug/rentalsource_search_page.png
-data/debug/rentalsource_search_page.html
-```
-
-If extraction breaks, inspect `data/debug/rentalsource_search_page.html` and update `selectors.rentalsource.json`.
+3. Run `run_affordablehousing_search.py --manual-search --keep-open`.
+4. Run `run_rentalsource_search.py --location "Boston, MA" --max-listings 20`.
+5. Check the CSVs in `data/processed/`.
+6. Check `data/debug/` HTML if extraction is wrong and tighten selectors.
+7. Start `run_housing_ui.py` and open `http://127.0.0.1:8765`.
 
 ## Safety / compliance notes
 
